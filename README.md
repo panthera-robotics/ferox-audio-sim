@@ -95,6 +95,33 @@ rclpy.spin(n)
 "'
 ```
 
+## Acoustic loopback test
+
+Verify mic and speaker work end-to-end with a human in the loop:
+
+    ./scripts/test_echo.sh
+
+Speak into your headset. You should hear yourself with ~180ms delay.
+Press Ctrl+C to stop cleanly.
+
+The script uses `docker exec -it` so SIGINT forwards into the container.
+Without `-t`, Ctrl+C does NOT reliably reach the Python process inside —
+the echo loop will keep running after your shell returns. This is a
+generic docker gotcha, not specific to this repo.
+
+## Cleaning up a hanging test
+
+If a `docker exec` session was started without `-t` and Ctrl+C didn't
+reach the inner process:
+
+    docker exec ferox_audio_sim pgrep -af python      # confirm it's still alive
+    docker exec ferox_audio_sim pkill -f echo_test    # or just pkill -f python
+    docker exec ferox_audio_sim pgrep -af python || echo "clean"
+
+For a heavier reset, restart the container:
+
+    docker restart ferox_audio_sim
+
 ## Consuming AudioChunk from another package
 
 The audio topics use **BEST_EFFORT reliability** — DDS will silently

@@ -39,6 +39,14 @@ everything must match the rest of the Panthera stack or DDS discovery
 silently fails. Every runtime dependency goes in `docker/Dockerfile`;
 nothing is installed live in a running container.
 
+## Working with the running container
+
+Interactive scripts run via `docker exec` MUST use `-it` (or at least
+`-t`) so SIGINT forwards correctly. Without it, Ctrl+C in the host
+terminal does not reach the inner process and the container-side
+script keeps running. See `scripts/test_echo.sh` for the canonical
+pattern.
+
 ## Boundaries
 
 This repo does **NOT** depend on Ferox or ferox-speech. Downstream repos
