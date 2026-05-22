@@ -95,30 +95,43 @@ rclpy.spin(n)
 "'
 ```
 
-## Consuming the AudioChunk message from another repo
+## Consuming AudioChunk from another package
 
-`ferox-speech` and the future `ferox_audio_go2` / `ferox_audio_g1` drivers
-only need the message, not the bridge node. Add `ferox_audio_msgs` to the
-consumer's colcon workspace and declare the dependency — two lines:
+The audio topics use **BEST_EFFORT reliability** — DDS will silently
+refuse to match RELIABLE subscribers, and you will see warnings like
+`incompatible QoS. No messages will be received` with no further hint.
 
-```xml
-<!-- consumer package.xml -->
-<depend>ferox_audio_msgs</depend>
-```
-
-```bash
-# bring ferox_audio_msgs into the consumer's workspace, e.g.:
-ln -s ~/panthera/ferox-audio-sim/src/ferox_audio_msgs  <consumer_ws>/src/
-colcon build --packages-select ferox_audio_msgs <consumer_pkg>
-```
+Use the ROS 2 built-in `qos_profile_sensor_data` profile for both
+publishing and subscribing:
 
 ```python
-# consumer code
+from rclpy.qos import qos_profile_sensor_data
 from ferox_audio_msgs.msg import AudioChunk
+
+# Subscribing to mic_raw
+self.create_subscription(
+    AudioChunk,
+    "/ferox/<robot_id>/audio/mic_raw",
+    self._on_audio,
+    qos_profile_sensor_data,
+)
+
+# Publishing to speaker_out
+self.pub = self.create_publisher(
+    AudioChunk,
+    "/ferox/<robot_id>/audio/speaker_out",
+    qos_profile_sensor_data,
+)
 ```
 
-`ferox_audio_msgs` is a tiny, dependency-light rosidl package precisely so
-it can be vendored this way without dragging in the bridge or Ferox.
+This is the canonical QoS for streaming sensor data in ROS 2 —
+BEST_EFFORT, KEEP_LAST, depth 5. It matches the audio_bridge node's
+configuration exactly.
+
+Build dependency: add `<depend>ferox_audio_msgs</depend>` to your
+consumer's package.xml. `ferox_audio_msgs` is a tiny, dependency-light
+rosidl package precisely so it can be vendored into a consumer's colcon
+workspace without dragging in the bridge node or Ferox.
 
 ## Real-hardware counterparts
 

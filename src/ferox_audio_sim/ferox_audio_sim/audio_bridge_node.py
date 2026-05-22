@@ -25,7 +25,7 @@ from typing import Optional, Tuple
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.qos import qos_profile_sensor_data
 
 import sounddevice as sd
 import soundfile as sf
@@ -33,13 +33,11 @@ from scipy.signal import resample_poly
 
 from ferox_audio_msgs.msg import AudioChunk
 
-# Audio is real-time: a dropped frame is gone, not worth resending. BEST_EFFORT
-# keeps latency flat; RELIABLE would buffer-and-lag on any hiccup.
-AUDIO_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.BEST_EFFORT,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=10,
-)
+# Audio is real-time streaming sensor data, so both topics use ROS 2's
+# built-in qos_profile_sensor_data (BEST_EFFORT, KEEP_LAST, depth 5). A
+# dropped frame is gone, not worth resending — RELIABLE would buffer-and-lag
+# on any hiccup. Every consumer MUST use this same profile: DDS silently
+# refuses to match a RELIABLE subscriber to a BEST_EFFORT publisher.
 
 # How long to stay in silence-fallback before retrying a failed mic device.
 MIC_RETRY_COOLDOWN_S = 30.0
@@ -96,9 +94,11 @@ class AudioBridge(Node):
             raise RuntimeError("mic_sample_rate * mic_chunk_ms / 1000 must be > 0")
 
         # ---- ROS I/O ----
-        self._mic_pub = self.create_publisher(AudioChunk, "audio/mic_raw", AUDIO_QOS)
+        self._mic_pub = self.create_publisher(
+            AudioChunk, "audio/mic_raw", qos_profile_sensor_data)
         self._spk_sub = self.create_subscription(
-            AudioChunk, "audio/speaker_out", self._on_speaker, AUDIO_QOS)
+            AudioChunk, "audio/speaker_out", self._on_speaker,
+            qos_profile_sensor_data)
 
         # ---- mic state ----
         self._mic_stream: Optional[sd.InputStream] = None

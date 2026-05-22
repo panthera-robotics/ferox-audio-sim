@@ -20,9 +20,17 @@ future `ferox_audio_go2` / `ferox_audio_g1` hardware drivers identically:
 - subscribes `/ferox/<robot_id>/audio/speaker_out` — PCM to play
 
 Message: `ferox_audio_msgs/msg/AudioChunk` (sample_rate, channels,
-sample_width, data). QoS: BEST_EFFORT, depth 10. Topic names are RELATIVE
-in the node; the `/ferox/<robot_id>/` namespace is applied by the launch
-file's `PushRosNamespace`, never hardcoded.
+sample_width, data). Topic names are RELATIVE in the node; the
+`/ferox/<robot_id>/` namespace is applied by the launch file's
+`PushRosNamespace`, never hardcoded.
+
+## Topic contract (QoS)
+
+Both audio topics use `qos_profile_sensor_data` (BEST_EFFORT, KEEP_LAST,
+depth 5). Any consumer that doesn't match this profile will silently
+fail with a DDS "incompatible QoS" warning. Use the import path
+`from rclpy.qos import qos_profile_sensor_data` — do not construct a
+custom equivalent.
 
 ## Standing tech conventions
 

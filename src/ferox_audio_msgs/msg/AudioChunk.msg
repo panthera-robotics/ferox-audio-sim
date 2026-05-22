@@ -1,3 +1,6 @@
+# QoS contract: producers and consumers must use BEST_EFFORT reliability
+# (rclpy.qos.qos_profile_sensor_data). RELIABLE subscribers will not match.
+#
 # Raw audio frame for inter-process audio transport.
 # Producers fill exactly one of these per fixed-duration audio chunk
 # (typically 100ms). Consumers must check sample_rate, channels, and
