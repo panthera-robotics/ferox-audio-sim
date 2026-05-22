@@ -1,0 +1,17 @@
+# ferox_audio_sim — audio bridge parameters.
+#
+# The /**/ prefix matches the node under any namespace, so the same file
+# works regardless of the /ferox/<robot_id>/ push applied by the launch
+# file. Node name must stay 'audio_bridge'.
+/**/audio_bridge:
+  ros__parameters:
+    robot_id: "go2_01"
+    mic_mode: "host_mic"        # host_mic | file | silence
+    mic_file: ""                # WAV to loop when mic_mode=file
+    mic_sample_rate: 16000      # Hz — Whisper-canonical
+    mic_channels: 1             # 1 = mono (production)
+    mic_chunk_ms: 100           # chunk duration -> ~10 Hz on mic_raw
+    mic_device: ""              # sounddevice name/index; "" = system default
+    speaker_enabled: true
+    speaker_device: ""          # "" = system default output
+    log_throughput_every: 50    # health log cadence, in chunks

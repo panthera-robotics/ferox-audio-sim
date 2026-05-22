@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ferox_audio_msgs</name>
+  <version>0.1.0</version>
+  <description>
+    Audio transport interface for the Ferox audio bridge. Defines the
+    AudioChunk message — the raw PCM frame exchanged between an audio
+    backend (ferox_audio_sim today; ferox_audio_go2 / ferox_audio_g1 on
+    real hardware) and ferox-speech.
+
+    Deliberately a tiny, standalone, message-only package so any repo can
+    depend on it without pulling in the bridge node or Ferox.
+  </description>
+  <maintainer email="mohammed@pantherarobots.com">Mohammed Magdy</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>std_msgs</depend>
+
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

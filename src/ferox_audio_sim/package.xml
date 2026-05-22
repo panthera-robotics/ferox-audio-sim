@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ferox_audio_sim</name>
+  <version>0.1.0</version>
+  <description>
+    Host-side audio backend for Ferox. Bridges a laptop's microphone and
+    speaker to the Ferox audio topic contract:
+
+      publishes  /ferox/&lt;robot_id&gt;/audio/mic_raw      (AudioChunk)
+      subscribes /ferox/&lt;robot_id&gt;/audio/speaker_out  (AudioChunk)
+
+    ferox-speech consumes these topics and stays audio-device-agnostic.
+    The same contract is implemented by ferox_audio_go2 / ferox_audio_g1
+    against real robot hardware — those live in the driver repos.
+  </description>
+  <maintainer email="mohammed@pantherarobots.com">Mohammed Magdy</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>ferox_audio_msgs</depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <!-- sounddevice + soundfile have no rosdep key; installed via pip in
+       docker/Dockerfile. -->
+
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
