@@ -57,7 +57,9 @@ ENV ROS_DOMAIN_ID=42
 #   libpulse0 / pulseaudio-utils   : Pulse client lib + pactl for debugging
 #   rmw-cyclonedds-cpp             : DDS implementation — must match the stack
 #   launch / launch-ros            : included defensively (already in ros-base)
+#   gettext-base                   : envsubst — renders cyclonedds.xml.template
 RUN apt-get update && apt-get install -y --no-install-recommends \
+      gettext-base \
       libasound2-dev \
       libasound2-plugins \
       libportaudio2 \
@@ -70,6 +72,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-launch \
       ros-${ROS_DISTRO}-launch-ros \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- Cyclone DDS cross-machine config ----
+# Template + entrypoint wrapper render /tmp/cyclonedds.xml from
+# FEROX_DDS_PEER_{HOST,CLOUD} at container start and export
+# CYCLONEDDS_URI before exec'ing the existing entrypoint. Fail-loud if
+# either var is missing — silent multicast fallback on a tailnet is a
+# remote-debug trap.
+COPY config/cyclonedds.xml.template /etc/cyclonedds.xml.template
+COPY docker/entrypoint-dds.sh /usr/local/bin/entrypoint-dds.sh
+RUN chmod +x /usr/local/bin/entrypoint-dds.sh
 
 RUN pip3 install --no-cache-dir sounddevice soundfile
 
@@ -89,6 +101,9 @@ ENV AMENT_PREFIX_PATH=/workspace/install:/opt/ros/humble
 ENV LD_LIBRARY_PATH=/workspace/install/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib
 ENV PYTHONPATH=/workspace/install/local/lib/python3.10/dist-packages:/workspace/install/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages
 ENV PATH=/workspace/install/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# entrypoint-dds.sh renders the template here and re-exports this same
+# value; baking it as an image ENV makes it visible to `docker exec`.
+ENV CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
 
 # Entrypoint: source ROS + workspace, then launch the bridge. HOME is forced
 # to a writable path because the container runs as a host UID with no
@@ -105,4 +120,4 @@ RUN printf '%s\n' \
   > /entrypoint.sh \
  && chmod +x /entrypoint.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint-dds.sh", "/entrypoint.sh"]

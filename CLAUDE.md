@@ -39,6 +39,19 @@ everything must match the rest of the Panthera stack or DDS discovery
 silently fails. Every runtime dependency goes in `docker/Dockerfile`;
 nothing is installed live in a running container.
 
+## Cross-machine DDS env-var contract
+
+The container expects `FEROX_DDS_PEER_HOST` and `FEROX_DDS_PEER_CLOUD`
+as env at start — Tailscale IPs of the host and the compute peer. Missing
+either → fail-loud (prevents accidental multicast fallback on a tailnet,
+which silently produces a DDS mesh nobody else can see). The template
+`config/cyclonedds.xml.template` + `docker/entrypoint-dds.sh` render
+`/tmp/cyclonedds.xml` via `envsubst` and export `CYCLONEDDS_URI` before
+`exec`'ing the original `/entrypoint.sh`. `scripts/start.sh` sources
+`.env` (gitignored, see `.env.example`) and passes both vars through
+`docker run -e`. Same two values must be set on the ferox-speech side
+for the peer list to match.
+
 ## Working with the running container
 
 Interactive scripts run via `docker exec` MUST use `-it` (or at least

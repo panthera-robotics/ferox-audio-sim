@@ -66,6 +66,55 @@ The container runs `--network host`, `--device /dev/snd`, with the host
 PulseAudio socket mounted, on `ROS_DOMAIN_ID=42` with Cyclone DDS — the
 same DDS mesh as the rest of the stack.
 
+## Cross-machine setup
+
+When `ferox-speech` runs on a remote compute box (Vast.ai, a Tailscale
+DGX, etc.) instead of the same laptop, DDS multicast discovery does not
+traverse WAN. This repo configures **Cyclone DDS unicast over Tailscale**
+so both peers find each other explicitly.
+
+Prereqs: both machines on the same Tailscale tailnet, each with a
+`tailscale0` interface up.
+
+1. Get each machine's Tailscale IP:
+
+   ```bash
+   tailscale ip -4
+   ```
+
+2. On **this host**, copy `.env.example` to `.env` and fill in both IPs:
+
+   ```bash
+   cp .env.example .env
+   # edit .env:
+   #   FEROX_DDS_PEER_HOST=100.x.x.x   # this laptop's tailscale IP
+   #   FEROX_DDS_PEER_CLOUD=100.y.y.y  # remote compute's tailscale IP
+   ```
+
+   Put the **same two values** in ferox-speech's `.env` on the compute
+   side — the peer list has to match on both ends.
+
+3. Rebuild and restart:
+
+   ```bash
+   ./scripts/build.sh
+   ./scripts/start.sh
+   ```
+
+4. Confirm the rendered DDS config in the container logs:
+
+   ```bash
+   docker logs ferox_audio_sim 2>&1 | head -5
+   # expect:
+   #   [dds] Cyclone peers: 100.x.x.x, 100.y.y.y
+   #   [dds] config: file:///tmp/cyclonedds.xml
+   ```
+
+`scripts/start.sh` sources `.env` and **fails loud** if either peer var
+is missing — silent multicast fallback on a tailnet would look like
+working DDS that nobody else can see. `.env` is gitignored; never commit
+your tailnet IPs.
+
 ## Validate
 
 ```bash
