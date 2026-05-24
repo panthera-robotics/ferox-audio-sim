@@ -28,11 +28,12 @@ if [ -f "${REPO_ROOT}/.env" ]; then
 fi
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
 
-# Cross-machine Cyclone DDS unicast peers. Required — silent fallback to
-# multicast on a tailnet is a confusing remote-debug trap. Set both in
-# .env (see .env.example) or export them before running.
-: "${FEROX_DDS_PEER_HOST:?must be set (in .env or environment)}"
-: "${FEROX_DDS_PEER_CLOUD:?must be set (in .env or environment)}"
+# Cross-machine Cyclone DDS — both optional. Defaults to multicast on
+# auto-detected interface (works host-on-LAN). Set both in .env or
+# the shell when crossing a tunnel/VPN that drops multicast.
+# See .env.example for setup scenarios.
+FEROX_DDS_INTERFACE="${FEROX_DDS_INTERFACE:-}"
+FEROX_DDS_PEERS="${FEROX_DDS_PEERS:-}"
 UID_N="$(id -u)"
 GID_N="$(id -g)"
 PULSE_DIR="/run/user/${UID_N}/pulse"
@@ -60,7 +61,8 @@ fi
 echo "  docker image : ${IMAGE} OK"
 echo "  /dev/snd     : present"
 echo "  ROS_DOMAIN_ID: ${ROS_DOMAIN_ID}"
-echo "  dds peers    : ${FEROX_DDS_PEER_HOST}, ${FEROX_DDS_PEER_CLOUD}"
+echo "  dds iface    : ${FEROX_DDS_INTERFACE:-<auto>}"
+echo "  dds peers    : ${FEROX_DDS_PEERS:-<none, multicast only>}"
 echo "  run as       : ${UID_N}:${GID_N}"
 
 # ---- clean any stale container -------------------------------------------
@@ -81,8 +83,8 @@ docker run -d \
     -e HOME=/tmp \
     -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
     -e RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
-    -e FEROX_DDS_PEER_HOST="${FEROX_DDS_PEER_HOST}" \
-    -e FEROX_DDS_PEER_CLOUD="${FEROX_DDS_PEER_CLOUD}" \
+    -e FEROX_DDS_INTERFACE="${FEROX_DDS_INTERFACE}" \
+    -e FEROX_DDS_PEERS="${FEROX_DDS_PEERS}" \
     "${IMAGE}" "$@" >/dev/null
 
 # ---- fail-loud wait on the readiness marker ------------------------------

@@ -1,27 +1,38 @@
-<?xml version="1.0" encoding="UTF-8" ?>
-<CycloneDDS xmlns="https://cdds.io/config"
-            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-            xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ferox-audio-sim DDS — env-driven Cyclone DDS configuration.
+
+  TWO OPTIONAL ENV VARS (read by docker/entrypoint-dds.sh):
+
+    FEROX_DDS_INTERFACE   Network interface to pin (e.g. "tailscale0").
+                          Empty/unset => Cyclone auto-detects.
+
+    FEROX_DDS_PEERS       Space-separated peer IPs for cross-network
+                          discovery (Tailscale/VPN). Empty/unset =>
+                          multicast-only on local LAN.
+
+  COMMON SETUPS:
+    Host + nav on same LAN:           neither var set    (multicast works)
+    Host + Vast.ai over Tailscale:    both set           (dev cross-machine)
+    Host + remote LLM box over VPN:   both set           (prod cross-machine)
+
+  ALWAYS:
+    MaxAutoParticipantIndex=120 — keeps room when nav/speech/audio share
+    a host UDP port pool.
+-->
+<CycloneDDS xmlns="https://cdds.io/config">
   <Domain id="any">
     <General>
       <Interfaces>
-        <NetworkInterface name="tailscale0" presence_required="false" />
-        <NetworkInterface autodetermine="true" />
+        ${CYCLONE_INTERFACE_BLOCK}
       </Interfaces>
-      <AllowMulticast>false</AllowMulticast>
-      <EnableMulticastLoopback>false</EnableMulticastLoopback>
+      <AllowMulticast>spdp</AllowMulticast>
     </General>
     <Discovery>
       <Peers>
-        <Peer Address="${FEROX_DDS_PEER_HOST}" />
-        <Peer Address="${FEROX_DDS_PEER_CLOUD}" />
+        ${CYCLONE_PEERS_BLOCK}
       </Peers>
-      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
     </Discovery>
-    <Internal>
-      <Watermarks>
-        <WhcHigh>500kB</WhcHigh>
-      </Watermarks>
-    </Internal>
   </Domain>
 </CycloneDDS>
