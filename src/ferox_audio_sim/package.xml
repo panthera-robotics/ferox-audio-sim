@@ -19,7 +19,7 @@
 
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <depend>ferox_audio_msgs</depend>
+  <depend>ferox_msgs</depend>
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>

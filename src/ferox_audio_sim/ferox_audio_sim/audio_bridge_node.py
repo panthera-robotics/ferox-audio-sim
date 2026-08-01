@@ -31,7 +31,7 @@ import sounddevice as sd
 import soundfile as sf
 from scipy.signal import resample_poly
 
-from ferox_audio_msgs.msg import AudioChunk
+from ferox_msgs.msg import AudioChunk
 
 # Audio is real-time streaming sensor data, so both topics use ROS 2's
 # built-in qos_profile_sensor_data (BEST_EFFORT, KEEP_LAST, depth 5). A
