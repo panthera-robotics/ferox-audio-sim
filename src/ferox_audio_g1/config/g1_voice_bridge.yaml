@@ -1,0 +1,6 @@
+/**/g1_voice_bridge:
+  ros__parameters:
+    speaker_enabled: false
+    query_volume_on_start: true
+    app_name: "ferox_speech"
+    request_timeout_s: 2.0

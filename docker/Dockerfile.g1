@@ -1,0 +1,63 @@
+ARG ROS_BASE_IMAGE=ros:humble-ros-base@sha256:afb40d6be65331c20a114d4e229a7ef099fed1b17bf6370daee193514b32aa16
+ARG FEROX_MSGS_TAG=kevin-local
+FROM ferox/msgs:${FEROX_MSGS_TAG} AS ferox_msgs_artifact
+
+FROM ${ROS_BASE_IMAGE}
+ARG ROS_DISTRO=humble
+ARG UNITREE_ROS2_REF=668d1ec5a05d1c38d3306bdca7d59f2ba3581a88
+SHELL ["/bin/bash", "-lc"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential git python3-colcon-common-extensions python3-pytest \
+      ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+      ros-${ROS_DISTRO}-rosidl-default-generators \
+      ros-${ROS_DISTRO}-rosidl-generator-dds-idl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /unitree_ws/src \
+    && [[ "${UNITREE_ROS2_REF}" =~ ^[0-9a-f]{40}$ ]] \
+    && git init /unitree_ws/src/unitree_ros2 \
+    && git -C /unitree_ws/src/unitree_ros2 remote add origin \
+         https://github.com/unitreerobotics/unitree_ros2.git \
+    && git -c http.version=HTTP/1.1 -C /unitree_ws/src/unitree_ros2 fetch \
+         --depth 1 --no-tags origin "${UNITREE_ROS2_REF}" \
+    && git -C /unitree_ws/src/unitree_ros2 checkout --detach "${UNITREE_ROS2_REF}" \
+    && test "$(git -C /unitree_ws/src/unitree_ros2 rev-parse HEAD)" = "${UNITREE_ROS2_REF}" \
+    && source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && cd /unitree_ws \
+    && colcon build --merge-install --packages-select unitree_api \
+         --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+WORKDIR /workspace
+COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
+COPY src/ferox_audio_g1 /workspace/src/ferox_audio_g1
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && source /opt/ferox_msgs_ws/install/setup.bash \
+    && source /unitree_ws/install/setup.bash \
+    && colcon build --merge-install --packages-select ferox_audio_g1 \
+    && source /workspace/install/setup.bash \
+    && python3 -m pytest -q /workspace/src/ferox_audio_g1/test \
+    && python3 -c 'from ferox_msgs.msg import AudioChunk; from unitree_api.msg import Request, Response'
+
+COPY config/cyclonedds.xml.template /etc/cyclonedds.xml.template
+COPY docker/entrypoint-g1-dds.sh /usr/local/bin/entrypoint-g1-dds.sh
+RUN chmod 0555 /usr/local/bin/entrypoint-g1-dds.sh \
+    && groupadd --gid 10001 panthera \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash panthera \
+    && printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -eo pipefail' \
+      'source /opt/ros/humble/setup.bash' \
+      'source /opt/ferox_msgs_ws/install/setup.bash' \
+      'source /unitree_ws/install/setup.bash' \
+      'source /workspace/install/setup.bash' \
+      'exec ros2 launch ferox_audio_g1 g1_voice_bridge.launch.py "$@"' \
+      > /entrypoint-g1.sh \
+    && chmod 0555 /entrypoint-g1.sh
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV ROS_DOMAIN_ID=0
+ENV CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
+ENV HOME=/home/panthera
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/entrypoint-g1-dds.sh", "/entrypoint-g1.sh"]
