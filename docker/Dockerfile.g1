@@ -31,6 +31,7 @@ RUN mkdir -p /unitree_ws/src \
 WORKDIR /workspace
 COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
 COPY src/ferox_audio_g1 /workspace/src/ferox_audio_g1
+COPY docker/Dockerfile.g1 docker/entrypoint-g1-dds.sh /workspace/docker/
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
     && source /opt/ferox_msgs_ws/install/setup.bash \
     && source /unitree_ws/install/setup.bash \
