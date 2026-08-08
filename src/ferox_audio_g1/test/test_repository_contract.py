@@ -26,3 +26,22 @@ def test_dds_entrypoint_rejects_unexpanded_templates():
     entrypoint = (ROOT / "docker/entrypoint-g1-dds.sh").read_text()
     assert 'if "${" in source:' in entrypoint
     assert "unexpanded placeholder remains" in entrypoint
+
+
+def test_g1_deployment_requires_immutable_image_and_least_privilege():
+    compose = (ROOT / "docker/docker-compose.g1.yml").read_text()
+    assert compose.count("FEROX_AUDIO_G1_IMAGE:?") == 2
+    assert compose.count("read_only: true") == 2
+    assert compose.count("cap_drop: [ALL]") == 2
+    assert compose.count('security_opt: ["no-new-privileges:true"]') == 2
+    assert compose.count("pids_limit: 128") == 2
+    assert "/tmp:rw,nosuid,nodev,noexec" in compose
+    assert "privileged:" not in compose
+
+
+def test_audio_gateway_has_only_reviewed_directional_interfaces():
+    gateway = (ROOT / (
+        "src/ferox_audio_g1/ferox_audio_g1/audio_domain_gateway.py")).read_text()
+    assert "AudioChunk 42->0, diagnostics 0->42 only" in gateway
+    for forbidden in ("cmd_vel", "motor_cmd", "unitree_api", "create_service"):
+        assert forbidden not in gateway

@@ -1,0 +1,46 @@
+name: ferox-audio-g1
+
+services:
+  voice_bridge:
+    image: ${FEROX_AUDIO_G1_IMAGE:?set FEROX_AUDIO_G1_IMAGE to a validated immutable image reference}
+    container_name: ferox_audio_g1
+    network_mode: host
+    ipc: host
+    runtime: runc
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    stop_grace_period: 10s
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+      - /home/panthera/.ros:rw,nosuid,nodev,noexec,size=16m
+    environment:
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      ROS_DOMAIN_ID: "0"
+      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:-}
+      FEROX_DDS_PEERS: ${FEROX_DDS_PEERS:-}
+    restart: on-failure:5
+
+  audio_gateway:
+    image: ${FEROX_AUDIO_G1_IMAGE:?set FEROX_AUDIO_G1_IMAGE to a validated immutable image reference}
+    container_name: ferox_audio_g1_gateway
+    network_mode: host
+    ipc: host
+    runtime: runc
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    stop_grace_period: 10s
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+      - /home/panthera/.ros:rw,nosuid,nodev,noexec,size=16m
+    environment:
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:-}
+      FEROX_DDS_PEERS: ${FEROX_DDS_PEERS:-}
+    restart: on-failure:5
+    command: ["ros2", "run", "ferox_audio_g1", "audio_domain_gateway", "--robot-domain", "0", "--application-domain", "42", "--robot-id", "${ROBOT_ID:-g1_01}"]

@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
       cmake \
       python3-colcon-common-extensions \
+      python3-pytest \
       ros-${ROS_DISTRO}-ament-cmake \
       ros-${ROS_DISTRO}-rosidl-default-generators \
       ros-${ROS_DISTRO}-rosidl-default-runtime \
@@ -41,7 +42,9 @@ COPY src/ferox_audio_sim   ./src/ferox_audio_sim
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
  && . /opt/ferox_msgs_ws/install/setup.sh \
  && colcon build --merge-install \
-      --packages-select ferox_audio_sim
+      --packages-select ferox_audio_sim \
+ && . /ws/install/setup.sh \
+ && python3 -m pytest -q /ws/src/ferox_audio_sim/test
 
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime: slim image, install tree copied in from the builder.
@@ -113,9 +116,9 @@ ENV PATH=/workspace/install/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/b
 # value; baking it as an image ENV makes it visible to `docker exec`.
 ENV CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
 
-# Entrypoint: source ROS + workspace, then launch the bridge. HOME is forced
-# to a writable path because the container runs as a host UID with no
-# /etc/passwd entry (ros2 wants somewhere to put its logs).
+# Entrypoint: source ROS + workspace, then launch the bridge. The image has a
+# non-root default identity; deployments that need the desktop user's Pulse
+# socket may override it with `--user`, but never need to fall back to root.
 RUN printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -e' \
@@ -127,6 +130,10 @@ RUN printf '%s\n' \
   'export HOME=${HOME:-/tmp}' \
   'exec ros2 launch ferox_audio_sim audio_bridge.launch.py "$@"' \
   > /entrypoint.sh \
- && chmod +x /entrypoint.sh
+ && chmod +x /entrypoint.sh \
+ && groupadd --gid 10001 panthera \
+ && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash panthera
 
+ENV HOME=/home/panthera
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/entrypoint-dds.sh", "/entrypoint.sh"]

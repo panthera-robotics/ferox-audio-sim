@@ -19,6 +19,8 @@ launch file's PushRosNamespace, never hardcoded.
 from __future__ import annotations
 
 import time
+import threading
+import uuid
 from math import gcd
 from typing import Optional, Tuple
 
@@ -32,6 +34,7 @@ import soundfile as sf
 from scipy.signal import resample_poly
 
 from ferox_msgs.msg import AudioChunk
+from .stream_guard import StreamContractError, StreamGuard
 
 # Audio is real-time streaming sensor data, so both topics use ROS 2's
 # built-in qos_profile_sensor_data (BEST_EFFORT, KEEP_LAST, depth 5). A
@@ -112,6 +115,11 @@ class AudioBridge(Node):
         self._file_pcm: Optional[np.ndarray] = None
         self._file_pos = 0
         self._mic_cb_failed = False
+        self._mic_contract_lock = threading.Lock()
+        self._mic_stream_id = uuid.uuid4().hex
+        self._mic_sequence = 0
+        self._mic_sample_offset = 0
+        self._mic_discontinuity_pending = False
 
         # ---- speaker state ----
         self._spk_stream: Optional[sd.OutputStream] = None
@@ -122,6 +130,7 @@ class AudioBridge(Node):
         self._spk_count = 0
         self._spk_log_t0 = time.monotonic()
         self._spk_log_n0 = 0
+        self._spk_guard = StreamGuard()
 
         # ---- bring up ----
         self._start_mic()
@@ -203,6 +212,7 @@ class AudioBridge(Node):
         try:
             if status and status.input_overflow:
                 self._mic_overflows += 1
+                self._replace_mic_stream(discontinuity=True)
             self._publish_audio(bytes(indata), self.mic_channels, kind="mic")
         except Exception as exc:  # noqa: BLE001
             if not self._mic_cb_failed:
@@ -213,11 +223,16 @@ class AudioBridge(Node):
         buf = self._file_pcm
         n = self.chunk_samples
         end = self._file_pos + n
-        if end <= buf.size:
+        if end < buf.size:
             chunk = buf[self._file_pos:end]
+            self._file_pos = end
         else:
-            chunk = np.concatenate([buf[self._file_pos:], buf[:end - buf.size]])
-        self._file_pos = end % buf.size
+            # Never hide a file-loop discontinuity inside one AudioChunk.
+            chunk = buf[self._file_pos:]
+            self._file_pos = 0
+            self._publish_audio(chunk.tobytes(), 1, kind="mic", end=True)
+            self._replace_mic_stream(discontinuity=False)
+            return
         self._publish_audio(chunk.tobytes(), 1, kind="mic")
 
     def _tick_silence(self) -> None:
@@ -230,6 +245,7 @@ class AudioBridge(Node):
         if self._mic_in_fallback:
             return
         self._mic_in_fallback = True
+        self._replace_mic_stream(discontinuity=True)
         self._fallback_since = time.monotonic()
         self.get_logger().error(
             f"mic: {reason} — falling back to silence, retry in "
@@ -249,6 +265,7 @@ class AudioBridge(Node):
                 self.destroy_timer(self._mic_timer)
                 self._mic_timer = None
             self._mic_in_fallback = False
+            self._replace_mic_stream(discontinuity=True)
             self.get_logger().info("mic: host mic recovered")
         else:
             self._fallback_since = time.monotonic()
@@ -291,13 +308,21 @@ class AudioBridge(Node):
             return  # subscribed-and-discard: headless / file-input tests
         rate = int(msg.sample_rate)
         channels = int(msg.channels) or 1
+        raw = bytes(msg.data)
+        try:
+            self._spk_guard.accept(msg, raw)
+        except StreamContractError as exc:
+            self.get_logger().error(f"speaker: stream rejected: {exc}")
+            return
 
         if self._spk_stream is None:
             # Recover from an earlier open failure, but not faster than the
             # mic retry cadence — a missing sink does not fix itself instantly.
             if time.monotonic() - self._spk_open_failed_at < MIC_RETRY_COOLDOWN_S:
+                self._spk_guard.reset()
                 return
             if not self._open_speaker(rate, channels):
+                self._spk_guard.reset()
                 return
         elif rate != self._spk_rate or channels != self._spk_channels:
             self.get_logger().warning(
@@ -306,9 +331,9 @@ class AudioBridge(Node):
                 f"{rate}Hz/{channels}ch — reopening stream")
             self._spk_reopens += 1
             if not self._open_speaker(rate, channels):
+                self._spk_guard.reset()
                 return
 
-        raw = bytes(msg.data)
         if len(raw) % 2:
             self.get_logger().warning("speaker: odd-length PCM payload, dropping")
             return
@@ -325,6 +350,7 @@ class AudioBridge(Node):
                 pass
             self._spk_stream = None
             self._spk_open_failed_at = time.monotonic()
+            self._spk_guard.reset()
             return
 
         self._spk_count += 1
@@ -341,10 +367,33 @@ class AudioBridge(Node):
     # ------------------------------------------------------------------
     # Shared
     # ------------------------------------------------------------------
-    def _publish_audio(self, data: bytes, channels: int, kind: str) -> None:
+    def _replace_mic_stream(self, *, discontinuity: bool) -> None:
+        with self._mic_contract_lock:
+            self._mic_stream_id = uuid.uuid4().hex
+            self._mic_sequence = 0
+            self._mic_sample_offset = 0
+            self._mic_discontinuity_pending = bool(discontinuity)
+
+    def _publish_audio(
+        self, data: bytes, channels: int, kind: str, *, end: bool = False
+    ) -> None:
         msg = AudioChunk()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.robot_id
+        with self._mic_contract_lock:
+            msg.contract_version = AudioChunk.CONTRACT_VERSION
+            msg.encoding = AudioChunk.ENCODING_PCM_S16LE
+            msg.stream_id = self._mic_stream_id
+            msg.sequence = self._mic_sequence
+            msg.sample_offset = self._mic_sample_offset
+            msg.flags = AudioChunk.FLAG_START if self._mic_sequence == 0 else 0
+            if self._mic_discontinuity_pending:
+                msg.flags |= AudioChunk.FLAG_DISCONTINUITY
+                self._mic_discontinuity_pending = False
+            if end:
+                msg.flags |= AudioChunk.FLAG_END
+            self._mic_sequence += 1
+            self._mic_sample_offset += len(data) // (max(1, int(channels)) * 2)
         msg.sample_rate = self.mic_sample_rate
         msg.channels = channels
         msg.sample_width = 2  # int16

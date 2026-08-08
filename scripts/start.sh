@@ -17,7 +17,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 CONTAINER="ferox_audio_sim"
-IMAGE="ferox/audio_sim:humble"
+IMAGE="${FEROX_AUDIO_SIM_IMAGE:-ferox/audio_sim:humble}"
 READY_MARKER="audio_bridge ready"
 READY_TIMEOUT=30
 
@@ -39,6 +39,12 @@ GID_N="$(id -g)"
 PULSE_DIR="/run/user/${UID_N}/pulse"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
+
+if [[ ! "${IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] \
+    && [ "${FEROX_ALLOW_MUTABLE_IMAGE:-0}" != "1" ]; then
+    fail "FEROX_AUDIO_SIM_IMAGE must be an immutable name@sha256 reference. \
+Set FEROX_ALLOW_MUTABLE_IMAGE=1 only for explicit local development."
+fi
 
 # ---- preflight ------------------------------------------------------------
 echo "== ferox-audio-sim preflight =="
@@ -66,9 +72,12 @@ echo "  dds peers    : ${FEROX_DDS_PEERS:-<none, multicast only>}"
 echo "  run as       : ${UID_N}:${GID_N}"
 
 # ---- clean any stale container -------------------------------------------
+if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+    fail "${CONTAINER} is already running; stop it explicitly before replacement"
+fi
 if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
-    echo "Removing existing ${CONTAINER} container..."
-    docker rm -f "${CONTAINER}" >/dev/null
+    echo "Removing stopped ${CONTAINER} container..."
+    docker rm "${CONTAINER}" >/dev/null
 fi
 
 # ---- run ------------------------------------------------------------------
@@ -76,6 +85,11 @@ echo "Starting ${CONTAINER}..."
 docker run -d \
     --name "${CONTAINER}" \
     --network host \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --pids-limit 256 \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m \
     --device /dev/snd \
     --user "${UID_N}:${GID_N}" \
     -v "${PULSE_DIR}:${PULSE_DIR}" \
@@ -118,4 +132,4 @@ echo "${CONTAINER} is up."
 echo "  host PID  : ${CPID}"
 echo "  logs      : docker logs -f ${CONTAINER}"
 echo "  topics    : docker exec ${CONTAINER} ros2 topic list | grep audio"
-echo "  stop      : docker rm -f ${CONTAINER}"
+echo "  stop      : docker stop ${CONTAINER} && docker rm ${CONTAINER}"

@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import json
 import time
-import uuid
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from ferox_msgs.msg import AudioChunk
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from unitree_api.msg import Request, Response
 
 from .pcm_gate import PcmContractError, PcmGate
+from .health import voice_health_report
 
 
 PLAY_STREAM_API_ID = 1003
@@ -37,7 +38,7 @@ class G1VoiceBridge(Node):
             raise RuntimeError("invalid app_name or request_timeout_s")
 
         self._gate = PcmGate()
-        self._stream_id = uuid.uuid4().hex
+        self._unitree_stream_id = f"{self._app_name}-{time.clock_gettime_ns(time.CLOCK_BOOTTIME)}"
         self._identity_counter = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         self._inflight_id: int | None = None
         self._inflight_kind: str | None = None
@@ -47,6 +48,13 @@ class G1VoiceBridge(Node):
         self._rejected_chunks = 0
         self._requests_ok = 0
         self._play_requests_ok = 0
+        self._request_timeout_total = 0
+        self._unitree_error_total = 0
+        self._volume_confirmed = False
+        namespace_parts = [part for part in self.get_namespace().split("/") if part]
+        if len(namespace_parts) < 2 or namespace_parts[-2] != "ferox":
+            raise RuntimeError("G1 voice bridge must run in /ferox/<robot_id>")
+        self._robot_id = namespace_parts[-1]
 
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
         self._request_pub = self.create_publisher(Request, "/api/voice/request", qos)
@@ -58,7 +66,10 @@ class G1VoiceBridge(Node):
             self._on_audio,
             qos_profile_sensor_data,
         )
+        self._diagnostic_pub = self.create_publisher(
+            DiagnosticArray, "audio/diagnostics", qos)
         self._timer = self.create_timer(0.02, self._tick)
+        self._diagnostic_timer = self.create_timer(1.0, self._publish_diagnostics)
 
         if not self._speaker_enabled:
             self.get_logger().warning(
@@ -87,18 +98,19 @@ class G1VoiceBridge(Node):
         self._request_pub.publish(request)
 
     def _on_audio(self, message: AudioChunk) -> None:
-        now_ros = self.get_clock().now().nanoseconds / 1e9
         now_steady = time.monotonic()
-        source_stamp = float(message.header.stamp.sec) + (
-            float(message.header.stamp.nanosec) / 1e9)
         try:
             self._gate.accept(
                 data=bytes(message.data),
                 sample_rate=int(message.sample_rate),
                 channels=int(message.channels),
                 sample_width=int(message.sample_width),
-                source_stamp_s=source_stamp,
-                receive_ros_s=now_ros,
+                contract_version=int(message.contract_version),
+                encoding=int(message.encoding),
+                stream_id=str(message.stream_id),
+                sequence=int(message.sequence),
+                sample_offset=int(message.sample_offset),
+                flags=int(message.flags),
                 receive_steady_s=now_steady,
             )
         except PcmContractError as exc:
@@ -107,13 +119,14 @@ class G1VoiceBridge(Node):
             return
         self._accepted_chunks += 1
         if not self._speaker_enabled:
-            self._gate.clear()
+            self._gate.discard_buffer()
 
     def _tick(self) -> None:
         now = time.monotonic()
         if self._inflight_id is not None:
             assert self._inflight_since_s is not None
             if now - self._inflight_since_s > self._request_timeout_s:
+                self._request_timeout_total += 1
                 self._latch_fault(f"{self._inflight_kind} request timed out")
             return
         if self._latched_fault is not None:
@@ -128,7 +141,7 @@ class G1VoiceBridge(Node):
         if payload is not None:
             self._publish_request(
                 PLAY_STREAM_API_ID,
-                {"app_name": self._app_name, "stream_id": self._stream_id},
+                {"app_name": self._app_name, "stream_id": self._unitree_stream_id},
                 payload,
                 "play_stream",
             )
@@ -144,6 +157,7 @@ class G1VoiceBridge(Node):
         self._inflight_kind = None
         self._inflight_since_s = None
         if status != 0:
+            self._unitree_error_total += 1
             self._latch_fault(f"{kind} returned Unitree status {status}")
             return
         self._requests_ok += 1
@@ -153,12 +167,50 @@ class G1VoiceBridge(Node):
             try:
                 volume = int(json.loads(message.data)["volume"])
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                self._unitree_error_total += 1
                 self._latch_fault("get_volume returned an invalid payload")
                 return
             if not 0 <= volume <= 100:
+                self._unitree_error_total += 1
                 self._latch_fault("get_volume returned an out-of-range value")
                 return
+            self._volume_confirmed = True
             self.get_logger().info(f"G1 voice API ready; reported volume={volume}")
+
+    def _publish_diagnostics(self) -> None:
+        inflight_age_ms = -1.0
+        if self._inflight_since_s is not None:
+            inflight_age_ms = max(
+                0.0, (time.monotonic() - self._inflight_since_s) * 1000.0)
+        report = voice_health_report(
+            speaker_enabled=self._speaker_enabled,
+            volume_confirmed=self._volume_confirmed,
+            latched_fault=self._latched_fault,
+            accepted_chunks=self._accepted_chunks,
+            rejected_chunks=self._rejected_chunks,
+            requests_ok=self._requests_ok,
+            play_requests_ok=self._play_requests_ok,
+            request_timeout_total=self._request_timeout_total,
+            unitree_error_total=self._unitree_error_total,
+            buffered_bytes=self._gate.buffered_bytes,
+            inflight_age_ms=inflight_age_ms,
+        )
+        status = DiagnosticStatus()
+        status.level = (
+            DiagnosticStatus.OK,
+            DiagnosticStatus.WARN,
+            DiagnosticStatus.ERROR,
+            DiagnosticStatus.STALE,
+        )[report.level]
+        status.name = f"ferox/{self._robot_id}/audio"
+        status.message = report.message
+        status.hardware_id = self._robot_id
+        status.values = [KeyValue(key=key, value=value)
+                         for key, value in report.values]
+        message = DiagnosticArray()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.status = [status]
+        self._diagnostic_pub.publish(message)
 
     def _latch_fault(self, reason: str) -> None:
         if self._latched_fault is None:
