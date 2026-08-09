@@ -36,7 +36,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-from ferox_audio_msgs.msg import AudioChunk
+from ferox_msgs.msg import AudioChunk
 
 rclpy.init()
 node = Node("echo_test")

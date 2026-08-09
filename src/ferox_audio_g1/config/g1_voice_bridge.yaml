@@ -1,0 +1,12 @@
+/**/g1_voice_bridge:
+  ros__parameters:
+    speaker_enabled: false
+    query_volume_on_start: true
+    app_name: "ferox_speech"
+    request_timeout_s: 2.0
+    # Defaults preserve the reviewed Unitree PlayStream batching policy.
+    # Hardware evidence may justify tuning these without changing code.
+    target_request_ms: 1000
+    max_buffer_ms: 3000
+    max_interarrival_ms: 500
+    idle_flush_ms: 150

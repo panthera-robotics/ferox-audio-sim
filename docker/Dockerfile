@@ -5,7 +5,8 @@
 # into /ferox/<robot_id>/audio/mic_raw and plays /ferox/<robot_id>/audio/
 # speaker_out through the host speaker, over Cyclone DDS on ROS_DOMAIN_ID 42.
 #
-# Multi-stage: stage 1 builds ferox_audio_msgs + ferox_audio_sim, stage 2 is a
+# Multi-stage: stage 1 builds ferox_audio_sim against the shared ferox_msgs
+# artifact; stage 2 is a
 # slim runtime that only carries the install/ tree plus the audio + DDS libs.
 #
 # Build from the repo root:
@@ -13,6 +14,8 @@
 # ============================================================================
 
 ARG ROS_DISTRO=humble
+ARG FEROX_MSGS_TAG=humble
+FROM ferox/msgs:${FEROX_MSGS_TAG} AS ferox_msgs_artifact
 
 # ---------------------------------------------------------------------------
 # Stage 1 — builder: colcon build the two packages into a merged install tree.
@@ -26,18 +29,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
       cmake \
       python3-colcon-common-extensions \
+      python3-pytest \
       ros-${ROS_DISTRO}-ament-cmake \
       ros-${ROS_DISTRO}-rosidl-default-generators \
       ros-${ROS_DISTRO}-rosidl-default-runtime \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ws
-COPY src/ferox_audio_msgs  ./src/ferox_audio_msgs
+COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
 COPY src/ferox_audio_sim   ./src/ferox_audio_sim
 
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+ && . /opt/ferox_msgs_ws/install/setup.sh \
  && colcon build --merge-install \
-      --packages-select ferox_audio_msgs ferox_audio_sim
+      --packages-select ferox_audio_sim \
+ && . /ws/install/setup.sh \
+ && python3 -m pytest -q /ws/src/ferox_audio_sim/test
 
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime: slim image, install tree copied in from the builder.
@@ -83,7 +90,10 @@ COPY config/cyclonedds.xml.template /etc/cyclonedds.xml.template
 COPY docker/entrypoint-dds.sh /usr/local/bin/entrypoint-dds.sh
 RUN chmod +x /usr/local/bin/entrypoint-dds.sh
 
-RUN pip3 install --no-cache-dir sounddevice soundfile
+RUN pip3 install --no-cache-dir \
+      sounddevice==0.4.6 \
+      soundfile==0.12.1 \
+ && python3 -c "import numpy, scipy, sounddevice, soundfile; print(numpy.__version__, scipy.__version__, sounddevice.__version__, soundfile.__version__)"
 
 # Route ALSA's default PCM to the PulseAudio/PipeWire server. Ubuntu desktops
 # own the mic through Pulse; without this the container can see /dev/snd but
@@ -92,32 +102,38 @@ RUN printf 'pcm.!default { type pulse }\nctl.!default { type pulse }\n' \
       > /etc/asound.conf
 
 # Carry only the built workspace — no source, no build tools.
+COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
 COPY --from=builder /ws/install /workspace/install
 
 # docker exec does NOT run the entrypoint, so bake the ROS + workspace
 # environment onto the image. Without this, `docker exec ... ros2 ...` and
-# the python3 validation snippets cannot resolve ros2 / ferox_audio_msgs.
-ENV AMENT_PREFIX_PATH=/workspace/install:/opt/ros/humble
-ENV LD_LIBRARY_PATH=/workspace/install/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib
-ENV PYTHONPATH=/workspace/install/local/lib/python3.10/dist-packages:/workspace/install/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages
+# the python3 validation snippets cannot resolve ros2 / ferox_msgs.
+ENV AMENT_PREFIX_PATH=/workspace/install:/opt/ferox_msgs_ws/install/ferox_msgs:/opt/ros/humble
+ENV LD_LIBRARY_PATH=/workspace/install/lib:/opt/ferox_msgs_ws/install/ferox_msgs/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib
+ENV PYTHONPATH=/workspace/install/local/lib/python3.10/dist-packages:/workspace/install/lib/python3.10/site-packages:/opt/ferox_msgs_ws/install/ferox_msgs/local/lib/python3.10/dist-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages
 ENV PATH=/workspace/install/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # entrypoint-dds.sh renders the template here and re-exports this same
 # value; baking it as an image ENV makes it visible to `docker exec`.
 ENV CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
 
-# Entrypoint: source ROS + workspace, then launch the bridge. HOME is forced
-# to a writable path because the container runs as a host UID with no
-# /etc/passwd entry (ros2 wants somewhere to put its logs).
+# Entrypoint: source ROS + workspace, then launch the bridge. The image has a
+# non-root default identity; deployments that need the desktop user's Pulse
+# socket may override it with `--user`, but never need to fall back to root.
 RUN printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -e' \
   'source /opt/ros/humble/setup.bash' \
+  'source /opt/ferox_msgs_ws/install/setup.bash' \
   'source /workspace/install/setup.bash' \
   'export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp' \
   'export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}' \
   'export HOME=${HOME:-/tmp}' \
   'exec ros2 launch ferox_audio_sim audio_bridge.launch.py "$@"' \
   > /entrypoint.sh \
- && chmod +x /entrypoint.sh
+ && chmod +x /entrypoint.sh \
+ && groupadd --gid 10001 panthera \
+ && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash panthera
 
+ENV HOME=/home/panthera
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/entrypoint-dds.sh", "/entrypoint.sh"]
