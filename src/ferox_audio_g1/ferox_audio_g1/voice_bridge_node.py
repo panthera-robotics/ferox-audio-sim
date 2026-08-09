@@ -14,11 +14,11 @@ from unitree_api.msg import Request, Response
 from .pcm_gate import PcmContract, PcmContractError, PcmGate
 from .playback_telemetry import PlaybackTelemetry
 from .health import voice_health_report
-
-
-PLAY_STREAM_API_ID = 1003
-STOP_PLAY_API_ID = 1004
-GET_VOLUME_API_ID = 1005
+from .unitree_voice_contract import (
+    GET_VOLUME_API_ID,
+    PLAY_STREAM_API_ID,
+    STOP_PLAY_API_ID,
+)
 
 
 class G1VoiceBridge(Node):

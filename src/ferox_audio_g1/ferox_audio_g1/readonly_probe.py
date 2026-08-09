@@ -11,7 +11,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from unitree_api.msg import Request, Response
 
-from .voice_bridge_node import GET_VOLUME_API_ID
+from .unitree_voice_contract import GET_VOLUME_API_ID
 
 
 class VolumeProbe(Node):

@@ -26,6 +26,8 @@ setup(
         "console_scripts": [
             "g1_voice_bridge = ferox_audio_g1.voice_bridge_node:main",
             "g1_voice_readonly_probe = ferox_audio_g1.readonly_probe:main",
+            "g1_speaker_latency_probe = ferox_audio_g1.speaker_latency_probe:main",
+            "g1_readaloud_probe = ferox_audio_g1.readaloud_probe:main",
             "audio_domain_gateway = ferox_audio_g1.audio_domain_gateway:main",
         ],
     },
