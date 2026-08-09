@@ -45,4 +45,3 @@ def synthesize_chirp(
         sample = int(round(peak * max(0.0, envelope) * math.sin(phase)))
         output.extend(struct.pack("<h", sample))
     return bytes(output)
-

@@ -90,4 +90,3 @@ def analyze_readaloud_pcm(
         "clipped_sample_fraction": round(clipped / max(1, len(samples)), 9),
         "clipping_gate_passed": clipped / max(1, len(samples)) <= 0.0001,
     }
-
