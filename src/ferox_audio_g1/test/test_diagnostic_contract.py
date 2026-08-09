@@ -4,6 +4,7 @@ from ferox_audio_g1.diagnostic_contract import (
     BOOLEANS,
     COUNTERS,
     KEYS,
+    TIMINGS,
     validate_audio_diagnostic,
 )
 
@@ -12,11 +13,12 @@ def _message(*, level=0, changes=None):
     values = {key: "0" for key in COUNTERS}
     values.update({key: "false" for key in BOOLEANS})
     values.update({
-        "schema_version": "1",
+        "schema_version": "2",
         "ready": "true" if level == 0 else "false",
-        "inflight_age_ms": "-1.0",
         "last_fault": "",
     })
+    values.update({key: ("0.0" if key == "buffered_audio_ms" else "-1.0")
+                   for key in TIMINGS})
     values.update(changes or {})
     assert set(values) == set(KEYS)
     status = SimpleNamespace(

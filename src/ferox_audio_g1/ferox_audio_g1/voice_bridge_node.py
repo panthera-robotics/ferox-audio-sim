@@ -11,7 +11,8 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from unitree_api.msg import Request, Response
 
-from .pcm_gate import PcmContractError, PcmGate
+from .pcm_gate import PcmContract, PcmContractError, PcmGate
+from .playback_telemetry import PlaybackTelemetry
 from .health import voice_health_report
 
 
@@ -29,6 +30,10 @@ class G1VoiceBridge(Node):
         self.declare_parameter("query_volume_on_start", True)
         self.declare_parameter("app_name", "ferox_speech")
         self.declare_parameter("request_timeout_s", 2.0)
+        self.declare_parameter("target_request_ms", 1000)
+        self.declare_parameter("max_buffer_ms", 3000)
+        self.declare_parameter("max_interarrival_ms", 500)
+        self.declare_parameter("idle_flush_ms", 150)
 
         self._speaker_enabled = bool(self.get_parameter("speaker_enabled").value)
         self._query_volume = bool(self.get_parameter("query_volume_on_start").value)
@@ -37,7 +42,17 @@ class G1VoiceBridge(Node):
         if not self._app_name or not 0.1 <= self._request_timeout_s <= 10.0:
             raise RuntimeError("invalid app_name or request_timeout_s")
 
-        self._gate = PcmGate()
+        bytes_per_ms = 16_000 * 1 * 2 // 1000
+        self._gate = PcmGate(PcmContract(
+            target_request_bytes=(
+                int(self.get_parameter("target_request_ms").value) * bytes_per_ms),
+            max_buffer_bytes=(
+                int(self.get_parameter("max_buffer_ms").value) * bytes_per_ms),
+            max_interarrival_s=(
+                float(self.get_parameter("max_interarrival_ms").value) / 1000.0),
+            idle_flush_s=float(self.get_parameter("idle_flush_ms").value) / 1000.0,
+        ))
+        self._playback_telemetry = PlaybackTelemetry()
         self._unitree_stream_id = f"{self._app_name}-{time.clock_gettime_ns(time.CLOCK_BOOTTIME)}"
         self._identity_counter = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         self._inflight_id: int | None = None
@@ -139,6 +154,11 @@ class G1VoiceBridge(Node):
             return
         payload = self._gate.pop_request(now)
         if payload is not None:
+            evidence = self._gate.last_pop_evidence
+            if evidence is None:
+                self._latch_fault("PCM gate omitted request evidence")
+                return
+            self._playback_telemetry.record_dispatch(evidence)
             self._publish_request(
                 PLAY_STREAM_API_ID,
                 {"app_name": self._app_name, "stream_id": self._unitree_stream_id},
@@ -152,6 +172,9 @@ class G1VoiceBridge(Node):
         if int(message.header.identity.id) != self._inflight_id:
             return
         kind = self._inflight_kind
+        response_latency_ms = (
+            (time.monotonic() - self._inflight_since_s) * 1000.0
+            if self._inflight_since_s is not None else None)
         status = int(message.header.status.code)
         self._inflight_id = None
         self._inflight_kind = None
@@ -162,6 +185,8 @@ class G1VoiceBridge(Node):
             return
         self._requests_ok += 1
         if kind == "play_stream":
+            assert response_latency_ms is not None
+            self._playback_telemetry.record_play_response(response_latency_ms)
             self._play_requests_ok += 1
         if kind == "get_volume":
             try:
@@ -193,7 +218,9 @@ class G1VoiceBridge(Node):
             request_timeout_total=self._request_timeout_total,
             unitree_error_total=self._unitree_error_total,
             buffered_bytes=self._gate.buffered_bytes,
+            buffered_audio_ms=self._gate.buffered_audio_ms,
             inflight_age_ms=inflight_age_ms,
+            playback=self._playback_telemetry.snapshot(),
         )
         status = DiagnosticStatus()
         status.level = (

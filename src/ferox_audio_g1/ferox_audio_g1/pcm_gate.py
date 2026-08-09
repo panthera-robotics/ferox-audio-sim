@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 import math
 import re
 
@@ -43,6 +44,14 @@ class PcmContract:
             raise ValueError("time gates must be positive")
 
 
+@dataclass(frozen=True)
+class PcmRequestEvidence:
+    flush_reason: str
+    first_chunk_to_request_ms: float
+    payload_bytes: int
+    payload_audio_ms: float
+
+
 class PcmGate:
     """Validate source chronology and assemble bounded PlayStream requests."""
 
@@ -54,10 +63,22 @@ class PcmGate:
         self._next_sequence = 0
         self._next_sample_offset = 0
         self._end_received = False
+        self._arrival_segments: deque[tuple[int, float]] = deque()
+        self._last_pop_evidence: PcmRequestEvidence | None = None
 
     @property
     def buffered_bytes(self) -> int:
         return len(self._buffer)
+
+    @property
+    def buffered_audio_ms(self) -> float:
+        bytes_per_second = (
+            self.contract.sample_rate * self.contract.channels * self.contract.sample_width)
+        return len(self._buffer) * 1000.0 / bytes_per_second
+
+    @property
+    def last_pop_evidence(self) -> PcmRequestEvidence | None:
+        return self._last_pop_evidence
 
     def clear(self) -> None:
         self._buffer.clear()
@@ -66,10 +87,14 @@ class PcmGate:
         self._next_sequence = 0
         self._next_sample_offset = 0
         self._end_received = False
+        self._arrival_segments.clear()
+        self._last_pop_evidence = None
 
     def discard_buffer(self) -> None:
         """Discard PCM while preserving validation state for a disabled sink."""
         self._buffer.clear()
+        self._arrival_segments.clear()
+        self._last_pop_evidence = None
         if self._end_received:
             self.clear()
 
@@ -164,12 +189,19 @@ class PcmGate:
             self._reject("PCM buffer overflow; stale audio was discarded")
 
         self._buffer.extend(payload)
+        self._arrival_segments.append((len(payload), receive_steady_s))
         self._last_receive_steady_s = receive_steady_s
         self._next_sequence += 1
         self._next_sample_offset += len(payload) // c.sample_width
         self._end_received = ended
 
     def ready(self, now_steady_s: float) -> bool:
+        now_steady_s = float(now_steady_s)
+        if not math.isfinite(now_steady_s):
+            self._reject("request clock must be finite")
+        if (self._last_receive_steady_s is not None
+                and now_steady_s < self._last_receive_steady_s):
+            self._reject("request clock moved behind the last received chunk")
         if len(self._buffer) >= self.contract.target_request_bytes:
             return True
         if self._buffer and self._end_received:
@@ -181,12 +213,39 @@ class PcmGate:
         )
 
     def pop_request(self, now_steady_s: float) -> bytes | None:
+        self._last_pop_evidence = None
         if not self.ready(now_steady_s):
             return None
         count = min(len(self._buffer), self.contract.target_request_bytes)
         count -= count % self.contract.sample_width
+        first_receive_s = self._arrival_segments[0][1]
+        delay_ms = max(0.0, (float(now_steady_s) - first_receive_s) * 1000.0)
+        reason = (
+            "target" if len(self._buffer) >= self.contract.target_request_bytes
+            else "end" if self._end_received else "idle"
+        )
         payload = bytes(self._buffer[:count])
         del self._buffer[:count]
+        remaining = count
+        while remaining:
+            segment_bytes, received_s = self._arrival_segments.popleft()
+            consumed = min(remaining, segment_bytes)
+            remaining -= consumed
+            if consumed < segment_bytes:
+                self._arrival_segments.appendleft((segment_bytes - consumed, received_s))
+        self._last_pop_evidence = PcmRequestEvidence(
+            flush_reason=reason,
+            first_chunk_to_request_ms=delay_ms,
+            payload_bytes=len(payload),
+            payload_audio_ms=self._duration_ms(len(payload)),
+        )
         if not self._buffer and self._end_received:
+            evidence = self._last_pop_evidence
             self.clear()
+            self._last_pop_evidence = evidence
         return payload
+
+    def _duration_ms(self, byte_count: int) -> float:
+        bytes_per_second = (
+            self.contract.sample_rate * self.contract.channels * self.contract.sample_width)
+        return byte_count * 1000.0 / bytes_per_second

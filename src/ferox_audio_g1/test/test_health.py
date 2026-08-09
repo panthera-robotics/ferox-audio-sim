@@ -1,6 +1,7 @@
 import pytest
 
 from ferox_audio_g1.health import ERROR, OK, WARN, voice_health_report
+from ferox_audio_g1.playback_telemetry import PlaybackTelemetry
 
 
 def _report(**changes):
@@ -15,7 +16,9 @@ def _report(**changes):
         request_timeout_total=0,
         unitree_error_total=0,
         buffered_bytes=0,
+        buffered_audio_ms=0.0,
         inflight_age_ms=-1.0,
+        playback=PlaybackTelemetry().snapshot(),
     )
     values.update(changes)
     return voice_health_report(**values)
@@ -37,6 +40,7 @@ def test_latched_fault_is_bounded_and_error():
     ("rejected_chunks", -1),
     ("buffered_bytes", 10**16),
     ("inflight_age_ms", float("nan")),
+    ("buffered_audio_ms", -1.0),
 ])
 def test_invalid_evidence_is_rejected(field, value):
     with pytest.raises(ValueError):

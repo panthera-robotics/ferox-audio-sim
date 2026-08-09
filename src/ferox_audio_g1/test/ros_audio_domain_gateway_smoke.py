@@ -7,7 +7,7 @@ import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from ferox_audio_g1.audio_domain_gateway import AudioDomainGateway
-from ferox_audio_g1.diagnostic_contract import BOOLEANS, COUNTERS
+from ferox_audio_g1.diagnostic_contract import BOOLEANS, COUNTERS, TIMINGS
 from ferox_msgs.msg import AudioChunk
 from rclpy.context import Context
 from rclpy.executors import SingleThreadedExecutor
@@ -46,14 +46,15 @@ def _diagnostic(node):
     values = {key: "0" for key in COUNTERS}
     values.update({key: "false" for key in BOOLEANS})
     values.update({
-        "schema_version": "1",
+        "schema_version": "2",
         "ready": "true",
         "speaker_enabled": "true",
         "volume_confirmed": "true",
         "microphone_available": "false",
-        "inflight_age_ms": "-1.0",
         "last_fault": "",
     })
+    values.update({key: ("0.0" if key == "buffered_audio_ms" else "-1.0")
+                   for key in TIMINGS})
     status = DiagnosticStatus()
     status.level = DiagnosticStatus.OK
     status.name = "ferox/g1_01/audio"

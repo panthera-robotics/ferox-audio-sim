@@ -113,6 +113,10 @@ def test_batches_one_second_of_pcm_without_reordering():
         )
     assert gate.ready(9.2)
     assert gate.pop_request(9.2) == b"".join(chunks)
+    assert gate.last_pop_evidence is not None
+    assert gate.last_pop_evidence.flush_reason == "target"
+    assert gate.last_pop_evidence.payload_audio_ms == 1000.0
+    assert gate.last_pop_evidence.first_chunk_to_request_ms == pytest.approx(100.0)
     assert gate.buffered_bytes == 0
 
 
@@ -120,6 +124,7 @@ def test_end_flag_flushes_partial_tail_immediately():
     gate = PcmGate()
     accept(gate, flags=FLAG_START | FLAG_END)
     assert gate.pop_request(10.0) == bytes(3_200)
+    assert gate.last_pop_evidence.flush_reason == "end"
     assert gate.buffered_bytes == 0
 
 
@@ -128,6 +133,23 @@ def test_flushes_open_stream_tail_only_after_idle_deadline():
     accept(gate, now=10.0)
     assert gate.pop_request(10.149) is None
     assert gate.pop_request(10.151) == bytes(3_200)
+    assert gate.last_pop_evidence.flush_reason == "idle"
+    assert gate.last_pop_evidence.first_chunk_to_request_ms == pytest.approx(151.0)
+
+
+def test_paced_speech_chunks_expose_real_bridge_batching_delay():
+    gate = PcmGate()
+    for index in range(10):
+        accept(
+            gate,
+            sequence=index,
+            offset=index * 1_600,
+            flags=FLAG_START if index == 0 else 0,
+            now=20.0 + index * 0.1,
+        )
+    assert gate.pop_request(20.9) == bytes(32_000)
+    assert gate.last_pop_evidence.first_chunk_to_request_ms == pytest.approx(900.0)
+    assert gate.last_pop_evidence.payload_audio_ms == 1000.0
 
 
 def test_receive_gap_rejects_without_cross_host_clock_comparison():
@@ -135,6 +157,16 @@ def test_receive_gap_rejects_without_cross_host_clock_comparison():
     accept(gate, now=10.0)
     with pytest.raises(PcmContractError, match="receive gap"):
         accept(gate, sequence=1, offset=1_600, flags=0, now=10.501)
+
+
+def test_request_clock_must_be_finite_and_monotonic():
+    gate = PcmGate()
+    accept(gate, now=10.0)
+    with pytest.raises(PcmContractError, match="finite"):
+        gate.pop_request(float("nan"))
+    accept(gate, now=11.0)
+    with pytest.raises(PcmContractError, match="behind"):
+        gate.pop_request(10.9)
 
 
 def test_active_stream_replacement_requires_discontinuity():

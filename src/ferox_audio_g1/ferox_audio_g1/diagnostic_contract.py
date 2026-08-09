@@ -7,14 +7,20 @@ import math
 COUNTERS = frozenset({
     "accepted_chunks_total", "rejected_chunks_total", "requests_ok_total",
     "play_requests_ok_total", "request_timeout_total", "unitree_error_total",
-    "buffered_bytes",
+    "buffered_bytes", "target_flush_total", "end_flush_total", "idle_flush_total",
 })
 BOOLEANS = frozenset({
     "ready", "speaker_enabled", "microphone_available", "volume_confirmed",
 })
 KEYS = frozenset({
-    "schema_version", "inflight_age_ms", "last_fault", *COUNTERS, *BOOLEANS,
+    "schema_version", "last_fault", *COUNTERS, *BOOLEANS,
+    "buffered_audio_ms", "inflight_age_ms",
+    "first_chunk_to_request_last_ms", "first_chunk_to_request_p95_ms",
+    "first_chunk_to_request_max_ms", "play_response_latency_last_ms",
+    "play_response_latency_p95_ms", "play_response_latency_max_ms",
+    "request_audio_last_ms",
 })
+TIMINGS = KEYS - COUNTERS - BOOLEANS - {"schema_version", "last_fault"}
 
 
 def _level_value(value) -> int:
@@ -52,7 +58,7 @@ def validate_audio_diagnostic(message, *, robot_id: str) -> str | None:
         if key not in KEYS or len(value) > 160 or "\x00" in value:
             return "audio diagnostic key or value is invalid"
         values[key] = value
-    if set(values) != set(KEYS) or values["schema_version"] != "1":
+    if set(values) != set(KEYS) or values["schema_version"] != "2":
         return "audio diagnostic schema mismatch"
     for key in BOOLEANS:
         if values[key] not in {"true", "false"}:
@@ -66,10 +72,13 @@ def validate_audio_diagnostic(message, *, robot_id: str) -> str | None:
             return f"audio diagnostic {key} is not an integer"
         if not 0 <= value <= 10**15:
             return f"audio diagnostic {key} is outside bounds"
-    try:
-        age = float(values["inflight_age_ms"])
-    except ValueError:
-        return "audio diagnostic inflight age is not numeric"
-    if not math.isfinite(age) or not -1.0 <= age <= 600_000.0:
-        return "audio diagnostic inflight age is outside bounds"
+    for key in TIMINGS:
+        try:
+            timing = float(values[key])
+        except ValueError:
+            return f"audio diagnostic {key} is not numeric"
+        if not math.isfinite(timing) or not -1.0 <= timing <= 600_000.0:
+            return f"audio diagnostic {key} is outside bounds"
+    if float(values["buffered_audio_ms"]) < 0.0:
+        return "audio diagnostic buffered_audio_ms cannot be unavailable"
     return None
