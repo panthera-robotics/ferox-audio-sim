@@ -2,25 +2,25 @@
 
 ## Repo role
 
-Host-side audio bridge between `sounddevice` (PortAudio mic/speaker) and
-ROS 2 topics. **Standalone — not part of Ferox.** It runs on a host
-Ubuntu laptop, in a Docker container, and lets `ferox-speech` do speech
-I/O over DDS without ever touching `/dev/snd` or PulseAudio.
+Audio backends for the shared Ferox ROS 2 topic contract. The simulation
+backend runs on a host Ubuntu laptop; G1 and Go2 packages adapt hardware APIs
+without exposing audio devices to `ferox-speech`.
 
-Two packages, one repo:
-- `ferox_audio_msgs` — the `AudioChunk` message only (ament_cmake/rosidl)
+Core packages, one repo:
+- `ferox_msgs` — the external shared `AudioChunk` interface
 - `ferox_audio_sim` — the `audio_bridge` rclpy node (ament_python)
+- `ferox_audio_g1` — G1 voice adapter and evidence probes
+- `ferox_audio_go2` — evidence-gated Go2 mic/speaker adapter
 
 ## Topic contract
 
-Every audio backend implements this — `ferox_audio_sim` here, and the
-future `ferox_audio_go2` / `ferox_audio_g1` hardware drivers identically:
+Every audio backend implements this identically:
 
 - publishes  `/ferox/<robot_id>/audio/mic_raw`     — captured mic PCM
 - subscribes `/ferox/<robot_id>/audio/speaker_out` — PCM to play
 
-Message: `ferox_audio_msgs/msg/AudioChunk` (sample_rate, channels,
-sample_width, data). Topic names are RELATIVE in the node; the
+Message: `ferox_msgs/msg/AudioChunk` (versioned stream metadata, PCM format,
+and data). Topic names are RELATIVE in each bridge node; the
 `/ferox/<robot_id>/` namespace is applied by the launch file's
 `PushRosNamespace`, never hardcoded.
 
@@ -62,9 +62,10 @@ pattern.
 
 ## Boundaries
 
-This repo does **NOT** depend on Ferox or ferox-speech. Downstream repos
-(ferox-speech, ferox_audio_go2/_g1) depend on `ferox_audio_msgs` as a
-small external package — never the other way around.
+This repo does **NOT** depend on the Ferox application or ferox-speech. Its
+backends and downstream consumers depend on the small external `ferox_msgs`
+interface package, never the other way around. Go2 hardware I/O remains
+disabled until a robot/firmware-specific, SHA-pinned evidence manifest passes.
 
 ## Commit style
 

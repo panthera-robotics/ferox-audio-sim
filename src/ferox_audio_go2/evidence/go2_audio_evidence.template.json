@@ -1,0 +1,34 @@
+{
+  "captured_utc": "YYYY-MM-DDTHH:MM:SSZ",
+  "codec_probe": {
+    "capture_sha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+    "decode_errors": 0,
+    "decoded_channels": 1,
+    "decoded_frames": 0,
+    "decoded_sample_rate": 0,
+    "decoder": "REPLACE_WITH_opus_OR_ulaw",
+    "operator_audio_intelligible": false,
+    "operator_id": "REPLACE_ME",
+    "recording_sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+  },
+  "hardware_profile": "REPLACE_WITH_PROFILE",
+  "observation": {
+    "capture_sha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+    "duration_s": 0.0,
+    "frame_count": 0,
+    "framed_payload_sha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+    "interval_p50_ms": 0.0,
+    "interval_p95_ms": 0.0,
+    "nonempty_ratio": 0.0,
+    "payload_bytes_max": 0,
+    "payload_bytes_min": 0,
+    "payload_bytes_mode": 0,
+    "time_frame_monotonic": false
+  },
+  "robot_id": "go2_02",
+  "schema_version": 1,
+  "source_firmware": "REPLACE_WITH_APP_REPORTED_FIRMWARE",
+  "source_topic": "/audiosender",
+  "source_type": "unitree_go/msg/AudioData",
+  "speaker_probe": null
+}

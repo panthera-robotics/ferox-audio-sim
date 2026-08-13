@@ -1,0 +1,21 @@
+/**/go2_audio_bridge:
+  ros__parameters:
+    # Fail closed until a specific robot/firmware capture has been reviewed.
+    mic_enabled: false
+    speaker_enabled: false
+    robot_id: "go2_02"
+    hardware_profile: ""
+    runtime_firmware: ""
+    evidence_path: ""
+    evidence_sha256: ""
+    evidence_max_age_days: 30.0
+    source_topic: "/audiosender"
+    mic_topic: "audio/mic_raw"
+    speaker_topic: "audio/speaker_out"
+    diagnostics_topic: "audio/diagnostics"
+    audiohub_request_topic: "/api/audiohub/request"
+    audiohub_response_topic: "/api/audiohub/response"
+    source_stale_s: 0.25
+    max_receive_gap_s: 0.10
+    audiohub_timeout_s: 2.0
+    max_utterance_s: 30.0

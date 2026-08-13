@@ -1,0 +1,72 @@
+name: ferox-audio-go2
+
+services:
+  audio_bridge:
+    image: ${FEROX_AUDIO_GO2_IMAGE:?set FEROX_AUDIO_GO2_IMAGE to a validated immutable image reference}
+    container_name: ferox_audio_go2
+    network_mode: host
+    ipc: host
+    runtime: runc
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    stop_grace_period: 10s
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+      - /home/panthera/.ros:rw,nosuid,nodev,noexec,size=16m
+    volumes:
+      # The invalid template makes the default-disabled deployment runnable.
+      # Enabling either path still requires a reviewed manifest and exact hash.
+      - ${GO2_AUDIO_EVIDENCE_PATH:-../src/ferox_audio_go2/evidence/go2_audio_evidence.template.json}:/run/ferox/go2-audio-evidence.json:ro
+    environment:
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      ROS_DOMAIN_ID: "0"
+      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:?set FEROX_DDS_INTERFACE, normally eth0}
+      FEROX_DDS_PEERS: ${FEROX_DDS_PEERS:-}
+    restart: on-failure:5
+    command:
+      - /entrypoint-go2.sh
+      - robot_id:=${ROBOT_ID:-go2_02}
+      - mic_enabled:=${GO2_AUDIO_MIC_ENABLED:-false}
+      - speaker_enabled:=${GO2_AUDIO_SPEAKER_ENABLED:-false}
+      - hardware_profile:=${GO2_AUDIO_PROFILE:-}
+      - runtime_firmware:=${GO2_AUDIO_RUNTIME_FIRMWARE:-}
+      - evidence_path:=/run/ferox/go2-audio-evidence.json
+      - evidence_sha256:=${GO2_AUDIO_EVIDENCE_SHA256:-}
+
+  audio_gateway:
+    image: ${FEROX_AUDIO_GO2_IMAGE:?set FEROX_AUDIO_GO2_IMAGE to a validated immutable image reference}
+    container_name: ferox_audio_go2_gateway
+    network_mode: host
+    ipc: host
+    runtime: runc
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    stop_grace_period: 10s
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+      - /home/panthera/.ros:rw,nosuid,nodev,noexec,size=16m
+    environment:
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:?set FEROX_DDS_INTERFACE, normally eth0}
+      FEROX_DDS_PEERS: ${FEROX_DDS_PEERS:-}
+    restart: on-failure:5
+    command:
+      - /entrypoint-go2-gateway.sh
+      - --robot-domain
+      - "0"
+      - --application-domain
+      - "42"
+      - --robot-id
+      - ${ROBOT_ID:-go2_02}
+      - --speaker-sample-rate
+      - "22050"
+      - --mic-enabled
+      - ${GO2_AUDIO_MIC_ENABLED:-false}
+      - --speaker-enabled
+      - ${GO2_AUDIO_SPEAKER_ENABLED:-false}

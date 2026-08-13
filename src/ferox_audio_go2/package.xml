@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ferox_audio_go2</name>
+  <version>0.1.0</version>
+  <description>Evidence-gated Ferox audio adapter for Unitree Go2 hardware.</description>
+  <maintainer email="engineering@panthera.robotics">Panthera Robotics</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>ferox_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>unitree_api</exec_depend>
+  <exec_depend>unitree_go</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>
