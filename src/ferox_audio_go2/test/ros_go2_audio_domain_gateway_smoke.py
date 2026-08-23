@@ -56,6 +56,14 @@ def diagnostic(node):
         evidence_sha256="a" * 64,
         last_fault=None,
         last_source_age_ms=10.0,
+        decode_p50_ms=0.01,
+        decode_p95_ms=0.02,
+        decode_p99_ms=0.03,
+        decode_max_ms=0.04,
+        source_to_chunk_p50_ms=80.0,
+        source_to_chunk_p95_ms=80.0,
+        source_to_chunk_p99_ms=107.4,
+        source_to_chunk_max_ms=108.6,
         counters={key: 0 for key in COUNTERS},
     )
     assert set(key for key, _ in report.values) == set((*BOOLEANS, *COUNTERS, *TEXT, *TIMINGS))
@@ -134,16 +142,24 @@ def main():
         speaker_pub.publish(audio(
             app_node, rate=22_050, stream="speaker-smoke", sequence=2,
             offset=4_410, flags=0, samples=2_205))
-        time.sleep(0.3)
+        # Both rejection callbacks must be fully drained before endpoint
+        # teardown; otherwise rmw can hand an already-destroying message to an
+        # executor task and emit a nondeterministic unhandled-future warning.
+        time.sleep(1.0)
         assert len(received_mic) == 2
         assert len(received_speaker) == 2
     finally:
+        # Stop the gateway while the fixture endpoints still exist.  Destroying
+        # those endpoints first can leave an in-flight DDS callback holding a
+        # message whose underlying rclpy handle is already being destroyed,
+        # producing a noisy "exception was never retrieved" after a passing
+        # smoke test.
+        gateway.close()
         for context, node, executor, thread in (robot, app):
             executor.shutdown()
             thread.join(timeout=2.0)
             node.destroy_node()
             context.try_shutdown()
-        gateway.close()
     print("Go2 audio domain gateway smoke passed")
 
 

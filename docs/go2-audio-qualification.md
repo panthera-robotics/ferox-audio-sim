@@ -138,3 +138,16 @@ Run ten controlled phrase loops with the speech mic gate active. Collect:
 M5.1 remains incomplete until microphone publication and physical speaker
 playback both pass on hardware. M5.2–M5.4 then require the separate 20-turn
 latency/intent, venue-acoustics, and Arabic/English runs from FRX-PLAN-001.
+
+## 7. HATS + 1 m spoken (later; do not run from this document tonight)
+
+`ferox-audio-go2` has **no AEC canceller**. AEC gates stay
+`missing_measurement`. `speaker_enable_authorized=false`. Empty-room 180 s
+WAV `388b4e31…` is idle noise, **not WER**. Do not unmute the speaker, do
+not call AudioHub 4001/4003 or G1 PlayStream 1001/1003/1006, and do not
+start a live 1 m spoken campaign from this qualification pass.
+
+The later procedure lives in:
+
+- `docs/hats-1m-spoken-runbook.md` in this repo
+- `ni/outputs/aec-hats-runbook-20260820T2134Z/` (evidence copy + STATUS.md)

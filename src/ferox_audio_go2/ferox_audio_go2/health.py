@@ -21,7 +21,12 @@ TEXT = (
     "schema_version", "hardware_profile", "runtime_firmware",
     "evidence_sha256", "last_fault",
 )
-TIMINGS = ("last_source_age_ms",)
+TIMINGS = (
+    "last_source_age_ms", "decode_p50_ms", "decode_p95_ms",
+    "decode_p99_ms", "decode_max_ms", "source_to_chunk_p50_ms",
+    "source_to_chunk_p95_ms", "source_to_chunk_p99_ms",
+    "source_to_chunk_max_ms",
+)
 HEALTH_KEYS = frozenset((*COUNTERS, *BOOLEANS, *TEXT, *TIMINGS))
 
 
@@ -45,16 +50,38 @@ def audio_health_report(
     evidence_sha256: str,
     last_fault: str | None,
     last_source_age_ms: float,
-    counters: dict[str, int],
+    decode_p50_ms: float = -1.0,
+    decode_p95_ms: float = -1.0,
+    decode_p99_ms: float = -1.0,
+    decode_max_ms: float = -1.0,
+    source_to_chunk_p50_ms: float = -1.0,
+    source_to_chunk_p95_ms: float = -1.0,
+    source_to_chunk_p99_ms: float = -1.0,
+    source_to_chunk_max_ms: float = -1.0,
+    counters: dict[str, int] | None = None,
 ) -> AudioHealthReport:
+    counters = counters or {}
     if set(counters) != set(COUNTERS):
         raise ValueError("Go2 audio health counters do not match the schema")
     if any(isinstance(value, bool) or not isinstance(value, int)
            or not 0 <= value <= 10**15 for value in counters.values()):
         raise ValueError("Go2 audio health counters are invalid")
     age = float(last_source_age_ms)
-    if not math.isfinite(age) or not -1.0 <= age <= 600_000.0:
-        raise ValueError("last_source_age_ms is invalid")
+    timing_values = {
+        "last_source_age_ms": age,
+        "decode_p50_ms": float(decode_p50_ms),
+        "decode_p95_ms": float(decode_p95_ms),
+        "decode_p99_ms": float(decode_p99_ms),
+        "decode_max_ms": float(decode_max_ms),
+        "source_to_chunk_p50_ms": float(source_to_chunk_p50_ms),
+        "source_to_chunk_p95_ms": float(source_to_chunk_p95_ms),
+        "source_to_chunk_p99_ms": float(source_to_chunk_p99_ms),
+        "source_to_chunk_max_ms": float(source_to_chunk_max_ms),
+    }
+    for name, value in timing_values.items():
+        if not math.isfinite(value) or not (
+                -1.0 <= value <= 600_000.0):
+            raise ValueError(f"{name} is invalid")
     fault = " ".join(str(last_fault or "").split())[:160]
     requested = bool(mic_enabled or speaker_enabled)
     capabilities_ready = (
@@ -71,12 +98,14 @@ def audio_health_report(
     else:
         level, message = OK, "Go2 audio adapter healthy"
     values = (
-        ("schema_version", "1"),
+        ("schema_version", "2"),
         ("hardware_profile", str(hardware_profile)[:128]),
         ("runtime_firmware", str(runtime_firmware)[:128]),
         ("evidence_sha256", str(evidence_sha256)[:64]),
         ("last_fault", fault),
         ("last_source_age_ms", f"{age:.3f}"),
+        *((name, f"{timing_values[name]:.3f}")
+          for name in TIMINGS if name != "last_source_age_ms"),
         ("ready", str(level == OK).lower()),
         ("mic_enabled", str(bool(mic_enabled)).lower()),
         ("speaker_enabled", str(bool(speaker_enabled)).lower()),
@@ -113,7 +142,7 @@ def validate_audio_diagnostic(message, *, robot_id: str) -> str | None:
         if key in values or key not in HEALTH_KEYS or len(value) > 160 or "\x00" in value:
             return "Go2 audio diagnostic key or value is invalid"
         values[key] = value
-    if set(values) != HEALTH_KEYS or values.get("schema_version") != "1":
+    if set(values) != HEALTH_KEYS or values.get("schema_version") != "2":
         return "Go2 audio diagnostic schema mismatch"
     for key in BOOLEANS:
         if values[key] not in {"true", "false"}:
@@ -127,10 +156,11 @@ def validate_audio_diagnostic(message, *, robot_id: str) -> str | None:
             return f"Go2 audio diagnostic {key} is not an integer"
         if not 0 <= value <= 10**15:
             return f"Go2 audio diagnostic {key} is outside bounds"
-    try:
-        age = float(values["last_source_age_ms"])
-    except ValueError:
-        return "Go2 audio last_source_age_ms is not numeric"
-    if not math.isfinite(age) or not -1.0 <= age <= 600_000.0:
-        return "Go2 audio last_source_age_ms is outside bounds"
+    for key in TIMINGS:
+        try:
+            value = float(values[key])
+        except ValueError:
+            return f"Go2 audio {key} is not numeric"
+        if not math.isfinite(value) or not -1.0 <= value <= 600_000.0:
+            return f"Go2 audio {key} is outside bounds"
     return None

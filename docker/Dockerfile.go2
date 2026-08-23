@@ -33,6 +33,7 @@ WORKDIR /workspace
 COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
 COPY src/ferox_audio_go2 /workspace/src/ferox_audio_go2
 COPY docker/Dockerfile.go2 docker/entrypoint-g1-dds.sh \
+     docker/entrypoint-go2-bridge.sh \
      docker/docker-compose.go2.yml /workspace/docker/
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
     && source /opt/ferox_msgs_ws/install/setup.bash \
@@ -46,7 +47,8 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
 
 COPY config/cyclonedds.xml.template /etc/cyclonedds.xml.template
 COPY docker/entrypoint-g1-dds.sh /usr/local/bin/entrypoint-go2-dds.sh
-RUN chmod 0555 /usr/local/bin/entrypoint-go2-dds.sh \
+COPY docker/entrypoint-go2-bridge.sh /entrypoint-go2.sh
+RUN chmod 0555 /usr/local/bin/entrypoint-go2-dds.sh /entrypoint-go2.sh \
     && groupadd --gid 10001 panthera \
     && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash panthera \
     && printf '%s\n' \
@@ -56,22 +58,14 @@ RUN chmod 0555 /usr/local/bin/entrypoint-go2-dds.sh \
       'source /opt/ferox_msgs_ws/install/setup.bash' \
       'source /unitree_ws/install/setup.bash' \
       'source /workspace/install/setup.bash' \
-      'exec ros2 launch ferox_audio_go2 go2_audio_bridge.launch.py "$@"' \
-      > /entrypoint-go2.sh \
-    && printf '%s\n' \
-      '#!/usr/bin/env bash' \
-      'set -eo pipefail' \
-      'source /opt/ros/humble/setup.bash' \
-      'source /opt/ferox_msgs_ws/install/setup.bash' \
-      'source /unitree_ws/install/setup.bash' \
-      'source /workspace/install/setup.bash' \
       'exec ros2 run ferox_audio_go2 go2_audio_domain_gateway "$@"' \
       > /entrypoint-go2-gateway.sh \
-    && chmod 0555 /entrypoint-go2.sh /entrypoint-go2-gateway.sh
+    && chmod 0555 /entrypoint-go2-gateway.sh
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ENV ROS_DOMAIN_ID=0
 ENV CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
+ENV ROS_LOG_DIR=/tmp/ros-logs
 ENV HOME=/home/panthera
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/entrypoint-go2-dds.sh"]

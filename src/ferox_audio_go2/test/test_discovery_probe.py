@@ -23,13 +23,41 @@ def frames(count=600):
 
 def test_probe_reports_wire_shape_without_claiming_a_codec():
     result = summarize_frames(frames(), duration_s=12.0)
+    assert result["schema_version"] == 2
+    assert result["subscriber_reliability"] == "reliable"
     assert result["frame_count"] == 600
     assert result["payload_bytes_mode"] == 160
     assert result["interval_p50_ms"] == pytest.approx(20.0)
+    assert result["effective_rate_hz"] == pytest.approx(50.0)
+    assert result["interval_p99_ms"] == pytest.approx(20.0)
+    assert result["receive_gap_count"] == 0
+    assert result["receive_burst_count"] == 0
     assert result["time_frame_monotonic"] is True
+    assert result["time_frame_step_mode"] == 1
+    assert result["time_frame_step_outlier_count"] == 0
     assert result["interpretation"] == "none"
     assert len(result["framed_payload_sha256"]) == 64
     assert len(result["capture_sha256"]) == 64
+
+
+def test_probe_quantifies_source_step_errors_and_receive_bursts():
+    items = frames(10)
+    items[4] = ObservedFrame(0.061, 99, b"x" * 160)
+    result = summarize_frames(items, duration_s=0.2)
+    assert result["receive_burst_count"] >= 1
+    assert result["time_frame_step_outlier_count"] >= 1
+
+
+def test_probe_records_selected_subscriber_reliability():
+    result = summarize_frames(
+        frames(2), duration_s=0.04, subscriber_reliability="best_effort")
+    assert result["subscriber_reliability"] == "best_effort"
+
+
+def test_probe_rejects_unknown_subscriber_reliability():
+    with pytest.raises(DiscoveryProbeError, match="subscriber_reliability"):
+        summarize_frames(
+            frames(2), duration_s=0.04, subscriber_reliability="unknown")
 
 
 def test_probe_rejects_absence_and_does_not_overwrite_evidence(tmp_path):

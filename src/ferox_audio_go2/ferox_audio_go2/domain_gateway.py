@@ -1,4 +1,9 @@
-"""Narrow Go2 gateway: mic/diagnostics 0->42, speaker AudioChunk 42->0."""
+"""Narrow Go2 gateway: mic/diagnostics 0->42, speaker AudioChunk 42->0.
+
+No AEC canceller lives here. AudioChunk is PCM transport only. AEC gates
+are missing_measurement via ferox_audio_go2.aec_unavailable; this gateway
+never unmutes the speaker on its own.
+"""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +16,7 @@ import rclpy
 from diagnostic_msgs.msg import DiagnosticArray
 from ferox_msgs.msg import AudioChunk
 from rclpy.context import Context
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 
@@ -78,10 +83,11 @@ class Go2AudioDomainGateway:
             if self._speaker_enabled else None)
         self._app_diagnostic_timer = self._app_node.create_timer(
             0.1, self._flush_diagnostic)
-        self._robot_executor = MultiThreadedExecutor(
-            num_threads=2, context=self._robot_context)
-        self._app_executor = MultiThreadedExecutor(
-            num_threads=2, context=self._app_context)
+        # Each domain has one dedicated spin thread and all cross-domain work
+        # crosses bounded queues.  A second executor thread pool adds no
+        # throughput here and makes endpoint teardown race with queued futures.
+        self._robot_executor = SingleThreadedExecutor(context=self._robot_context)
+        self._app_executor = SingleThreadedExecutor(context=self._app_context)
         self._robot_executor.add_node(self._robot_node)
         self._app_executor.add_node(self._app_node)
         self._stop_event = threading.Event()
@@ -164,9 +170,15 @@ class Go2AudioDomainGateway:
             return
 
     def close(self) -> None:
+        if self._stop_event.is_set():
+            return
         self._stop_event.set()
+        self._robot_executor.wake()
+        self._app_executor.wake()
         for thread in self._threads:
             thread.join(timeout=2.0)
+        if any(thread.is_alive() for thread in self._threads):
+            raise RuntimeError("Go2 audio domain gateway executor did not stop")
         self._robot_executor.shutdown()
         self._app_executor.shutdown()
         self._robot_executor.remove_node(self._robot_node)

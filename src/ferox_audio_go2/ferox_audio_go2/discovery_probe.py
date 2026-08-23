@@ -39,10 +39,17 @@ def _frame_capture_bytes(frames: Iterable[ObservedFrame]) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
-def summarize_frames(frames: Iterable[ObservedFrame], *, duration_s: float) -> dict:
+def summarize_frames(
+    frames: Iterable[ObservedFrame],
+    *,
+    duration_s: float,
+    subscriber_reliability: str = "reliable",
+) -> dict:
     items = list(frames)
     if not math.isfinite(duration_s) or duration_s <= 0:
         raise DiscoveryProbeError("duration_s must be finite and positive")
+    if subscriber_reliability not in {"best_effort", "reliable"}:
+        raise DiscoveryProbeError("subscriber_reliability is invalid")
     if not items:
         raise DiscoveryProbeError("no Go2 audio frames were observed")
     receive = [float(item.receive_steady_s) for item in items]
@@ -63,22 +70,52 @@ def summarize_frames(frames: Iterable[ObservedFrame], *, duration_s: float) -> d
         payload_digest.update(len(item.payload).to_bytes(4, "little"))
         payload_digest.update(item.payload)
     p95 = 0.0
+    p99 = 0.0
     if intervals:
         ordered = sorted(intervals)
         p95 = ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
+        p99 = ordered[max(0, math.ceil(0.99 * len(ordered)) - 1)]
+    source_steps = [right - left for left, right in zip(source, source[1:])]
+    positive_source_steps = [value for value in source_steps if value > 0]
+    source_step_mode = (
+        Counter(positive_source_steps).most_common(1)[0][0]
+        if positive_source_steps else None
+    )
+    source_step_outliers = (
+        sum(value != source_step_mode for value in source_steps)
+        if source_step_mode is not None else len(source_steps)
+    )
+    expected_interval_ms = (
+        1000.0 * duration_s / len(items) if items else 0.0)
+    receive_gap_count = sum(
+        value > expected_interval_ms * 2.0 for value in intervals)
+    receive_burst_count = sum(
+        value < expected_interval_ms * 0.5 for value in intervals)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_topic": "/audiosender",
         "source_type": "unitree_go/msg/AudioData",
+        "subscriber_reliability": subscriber_reliability,
         "duration_s": round(float(duration_s), 6),
         "frame_count": len(items),
+        "effective_rate_hz": round(len(items) / duration_s, 6),
         "nonempty_ratio": round(nonempty / len(items), 9),
         "payload_bytes_mode": mode_bytes,
         "payload_bytes_min": min(sizes),
         "payload_bytes_max": max(sizes),
         "interval_p50_ms": round(statistics.median(intervals), 6) if intervals else 0.0,
         "interval_p95_ms": round(p95, 6),
+        "interval_p99_ms": round(p99, 6),
+        "interval_max_ms": round(max(intervals), 6) if intervals else 0.0,
+        "receive_gap_count": receive_gap_count,
+        "receive_gap_fraction": round(
+            receive_gap_count / max(1, len(intervals)), 9),
+        "receive_burst_count": receive_burst_count,
+        "receive_burst_fraction": round(
+            receive_burst_count / max(1, len(intervals)), 9),
         "time_frame_monotonic": all(right > left for left, right in zip(source, source[1:])),
+        "time_frame_step_mode": source_step_mode,
+        "time_frame_step_outlier_count": source_step_outliers,
         "framed_payload_sha256": payload_digest.hexdigest(),
         "capture_sha256": hashlib.sha256(_frame_capture_bytes(items)).hexdigest(),
         "interpretation": "none",
@@ -155,6 +192,11 @@ def main(args=None) -> None:
     parser.add_argument("--duration-s", type=float, default=15.0)
     parser.add_argument("--output", required=True)
     parser.add_argument("--frames-output", required=True)
+    parser.add_argument(
+        "--qos-reliability",
+        choices=("best_effort", "reliable"),
+        default="reliable",
+    )
     options = parser.parse_args(args)
     if not 5.0 <= options.duration_s <= 120.0 or not math.isfinite(options.duration_s):
         parser.error("--duration-s must be finite and in [5, 120]")
@@ -165,7 +207,7 @@ def main(args=None) -> None:
     try:
         import rclpy
         from rclpy.node import Node
-        from rclpy.qos import qos_profile_sensor_data
+        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
         from unitree_go.msg import AudioData
     except ImportError as exc:  # pragma: no cover - ROS image only
         raise RuntimeError("Go2 audio discovery requires ROS Humble unitree_go") from exc
@@ -180,16 +222,32 @@ def main(args=None) -> None:
             payload=bytes(message.data),
         ))
 
-    node.create_subscription(
-        AudioData, "/audiosender", on_audio, qos_profile_sensor_data)
+    audio_qos = QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=32,
+        reliability=(
+            ReliabilityPolicy.RELIABLE
+            if options.qos_reliability == "reliable"
+            else ReliabilityPolicy.BEST_EFFORT
+        ),
+    )
+    node.create_subscription(AudioData, "/audiosender", on_audio, audio_qos)
     started = time.monotonic()
     try:
         while rclpy.ok() and time.monotonic() - started < options.duration_s:
             rclpy.spin_once(node, timeout_sec=0.1)
         elapsed = time.monotonic() - started
-        observation = summarize_frames(frames, duration_s=elapsed)
+        observation = summarize_frames(
+            frames,
+            duration_s=elapsed,
+            subscriber_reliability=options.qos_reliability,
+        )
         write_capture_bundle(options.output, options.frames_output, observation, frames)
         print(json.dumps(observation, sort_keys=True))
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised on the ROS target
+    main()

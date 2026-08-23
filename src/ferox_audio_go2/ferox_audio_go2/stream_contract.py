@@ -1,4 +1,8 @@
-"""Versioned Ferox AudioChunk continuity and format validation."""
+"""Versioned Ferox AudioChunk continuity and format validation.
+
+PCM transport only. There is no echo-return, residual, or TCLw field on
+this contract. ferox-audio-go2 has no canceller; see aec_unavailable.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

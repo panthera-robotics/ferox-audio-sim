@@ -16,23 +16,33 @@ NOW = datetime(2026, 8, 14, tzinfo=timezone.utc)
 
 def manifest(profile="go2_opus48_audiohub_v1", speaker=True):
     document = {
-        "schema_version": 1,
+        "schema_version": 2,
         "robot_id": "go2_02",
         "hardware_profile": profile,
         "source_firmware": "go2-fw-1.1.7",
         "source_topic": "/audiosender",
         "source_type": "unitree_go/msg/AudioData",
+        "subscriber_reliability": "reliable",
         "captured_utc": "2026-08-13T12:00:00Z",
         "observation": {
             "duration_s": 12.0,
             "frame_count": 600,
+            "effective_rate_hz": 50.0,
             "nonempty_ratio": 1.0,
             "payload_bytes_mode": 160,
             "payload_bytes_min": 160,
             "payload_bytes_max": 160,
             "interval_p50_ms": 20.0,
             "interval_p95_ms": 22.0,
+            "interval_p99_ms": 23.0,
+            "interval_max_ms": 25.0,
+            "receive_gap_count": 0,
+            "receive_gap_fraction": 0.0,
+            "receive_burst_count": 0,
+            "receive_burst_fraction": 0.0,
             "time_frame_monotonic": True,
+            "time_frame_step_mode": 200000,
+            "time_frame_step_outlier_count": 0,
             "framed_payload_sha256": "d" * 64,
             "capture_sha256": "e" * 64,
         },
@@ -88,6 +98,28 @@ def test_accepts_exact_recent_operator_confirmed_profile():
     assert result.speaker_confirmed is True
 
 
+def test_accepts_measured_go2_transport_batching_when_source_is_complete():
+    document = manifest()
+    document["observation"].update({
+        "duration_s": 120.018565,
+        "frame_count": 6000,
+        "effective_rate_hz": 49.992266,
+        "interval_p50_ms": 20.843529,
+        "interval_p95_ms": 42.562251,
+        "interval_p99_ms": 43.563949,
+        "interval_max_ms": 48.619427,
+        "receive_gap_count": 1807,
+        "receive_gap_fraction": 0.301216869,
+        "receive_burst_count": 2251,
+        "receive_burst_fraction": 0.375229205,
+        "time_frame_step_mode": 200000,
+        "time_frame_step_outlier_count": 0,
+    })
+    document["codec_probe"]["decoded_frames"] = 6000
+    result = validate(document)
+    assert result.frame_count == 6000
+
+
 @pytest.mark.parametrize(
     "mutate, reason",
     [
@@ -97,12 +129,18 @@ def test_accepts_exact_recent_operator_confirmed_profile():
         (lambda d: d["observation"].update(framed_payload_sha256="unknown"), "sha256"),
         (lambda d: d["codec_probe"].update(capture_sha256="f" * 64), "capture SHA"),
         (lambda d: d["observation"].update(interval_p50_ms=50), "cadence"),
+        (lambda d: d["observation"].update(effective_rate_hz=40), "effective frame rate"),
+        (lambda d: d["observation"].update(interval_max_ms=101), "transport stall"),
+        (lambda d: d["observation"].update(interval_p99_ms=float("nan")), "finite"),
+        (lambda d: d["observation"].update(receive_gap_count=1), "does not match"),
+        (lambda d: d["observation"].update(time_frame_step_outlier_count=1), "step"),
         (lambda d: d["codec_probe"].update(operator_audio_intelligible=False), "operator"),
         (lambda d: d["codec_probe"].update(decode_errors=1), "decode errors"),
         (lambda d: d["speaker_probe"].update(sample_rate=16_000), "PCM format"),
         (lambda d: d["speaker_probe"].update(request_topic="/other"), "topics"),
         (lambda d: d.update(captured_utc="2026-01-01T00:00:00Z"), "stale"),
         (lambda d: d.update(source_topic="/rt/audiosender"), "topic"),
+        (lambda d: d.update(subscriber_reliability="best_effort"), "reliable QoS"),
     ],
 )
 def test_rejects_profile_assumptions_without_matching_evidence(mutate, reason):

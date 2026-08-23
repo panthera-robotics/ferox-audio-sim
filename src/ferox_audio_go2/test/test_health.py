@@ -20,6 +20,14 @@ def report(**overrides):
         evidence_sha256="a" * 64,
         last_fault=None,
         last_source_age_ms=10.0,
+        decode_p50_ms=0.01,
+        decode_p95_ms=0.02,
+        decode_p99_ms=0.03,
+        decode_max_ms=0.04,
+        source_to_chunk_p50_ms=80.0,
+        source_to_chunk_p95_ms=80.0,
+        source_to_chunk_p99_ms=107.4,
+        source_to_chunk_max_ms=108.6,
         counters={key: 0 for key in COUNTERS},
     )
     options.update(overrides)

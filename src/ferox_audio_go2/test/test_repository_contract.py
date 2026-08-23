@@ -10,8 +10,12 @@ def test_go2_audio_is_fail_closed_and_evidence_pinned_by_default():
     launch = (ROOT / "src/ferox_audio_go2/launch/go2_audio_bridge.launch.py").read_text()
     assert "mic_enabled: false" in config
     assert "speaker_enabled: false" in config
+    assert config.count('"disabled"') >= 4
     assert "GO2_AUDIO_EVIDENCE_SHA256" in compose
     assert "GO2_AUDIO_RUNTIME_FIRMWARE" in compose
+    assert "GO2_AUDIO_PROFILE:-disabled" in compose
+    assert "GO2_AUDIO_RUNTIME_FIRMWARE:-disabled" in compose
+    assert "GO2_AUDIO_EVIDENCE_SHA256:-disabled" in compose
     assert "FEROX_DDS_INTERFACE:?" in compose
     for argument in (
             "mic_enabled", "speaker_enabled", "hardware_profile",
@@ -20,6 +24,9 @@ def test_go2_audio_is_fail_closed_and_evidence_pinned_by_default():
     node = (ROOT / "src/ferox_audio_go2/ferox_audio_go2/bridge_node.py").read_text()
     assert "status.level = bytes([report.level])" in node
     assert 'f"{robot_id}/mic"' in node
+    assert "ReliabilityPolicy.RELIABLE" in node
+    assert "source_to_chunk_p99_ms" in node
+    assert "source_to_chunk_max_ms" in node
     assert "Go2 audio protocol/topic override is not qualified" in node
 
 
@@ -54,6 +61,8 @@ def test_domain_gateway_is_audio_only():
     assert "speaker application->robot=" in gateway
     for forbidden in ("cmd_vel", "motor_cmd", "sport/request", "create_service"):
         assert forbidden not in gateway
+    assert "SingleThreadedExecutor" in gateway
+    assert "MultiThreadedExecutor" not in gateway
     compose = (ROOT / "docker/docker-compose.go2.yml").read_text()
     assert "--mic-enabled" in compose
     assert "--speaker-enabled" in compose
@@ -65,8 +74,36 @@ def test_discovery_is_read_only_and_does_not_name_a_codec():
     assert "create_subscription" in source
     assert "create_publisher" not in source
     assert '"interpretation": "none"' in source
+    assert 'if __name__ == "__main__"' in source
+    assert "ReliabilityPolicy.RELIABLE" in source
     assert "create_publisher" not in (
         ROOT / "src/ferox_audio_go2/ferox_audio_go2/decode_capture.py").read_text()
+    live_core = (ROOT / (
+        "src/ferox_audio_go2/ferox_audio_go2/live_core_qualification.py"
+    )).read_text()
+    assert "create_subscription" in live_core
+    assert "create_publisher" not in live_core
+    decode = (ROOT / "src/ferox_audio_go2/ferox_audio_go2/decode_capture.py").read_text()
+    assert "signal_metrics" in decode
+    assert '"speech_claim_authorized": False' in decode
+    assert "operator_audio_intelligible" in decode
+    assert "create_client" not in live_core
+    assert "unitree_api" not in live_core
+    assert "speaker_out" not in live_core
+    aec = (ROOT / "src/ferox_audio_go2/ferox_audio_go2/aec_unavailable.py").read_text()
+    assert "canceller_present" in aec
+    assert "missing_measurement" in aec
+    assert "speaker_enable_authorized" in aec
+    assert "engineering ERLE" in aec
+    for forbidden in (
+            "webrtc", "speex", "nlms", "PlayStream", "audiohub",
+            "4001", "4003", "1001", "1003", "1006"):
+        assert forbidden not in aec
+    runbook = (ROOT / "docs/hats-1m-spoken-runbook.md").read_text()
+    assert "Do not execute this capture now" in runbook
+    assert "388b4e31942772ddb248d31576fe3191aa1f6126553a34882ea1f6e89273662e" in runbook
+    assert "Do **not** unmute the robot speaker" in runbook
+    assert "Do **not** claim TCLw" in runbook
 
 
 def test_speaker_probe_is_bounded_one_shot_and_needs_human_confirmation():
@@ -83,6 +120,7 @@ def test_speaker_probe_is_bounded_one_shot_and_needs_human_confirmation():
 
 def test_arm64_image_builds_exact_unitree_commit_and_runs_gates():
     dockerfile = (ROOT / "docker/Dockerfile.go2").read_text()
+    bridge_entrypoint = (ROOT / "docker/entrypoint-go2-bridge.sh").read_text()
     assert "ROS_BASE_IMAGE=ros:humble-ros-base@sha256:7bea3d9aa2483d3ca34c8e30d921b79273b0913bd7dc64bebf51d082b5d107e4" in dockerfile
     assert "ARG FEROX_MSGS_IMAGE" in dockerfile
     assert "FROM ${FEROX_MSGS_IMAGE} AS ferox_msgs_artifact" in dockerfile
@@ -93,4 +131,8 @@ def test_arm64_image_builds_exact_unitree_commit_and_runs_gates():
     assert "ros_go2_audio_domain_gateway_smoke.py" in dockerfile
     assert "exec ros2 run ferox_audio_go2 go2_audio_domain_gateway" in dockerfile
     assert "> /entrypoint-go2-gateway.sh" in dockerfile
+    assert "ENV ROS_LOG_DIR=/tmp/ros-logs" in dockerfile
     assert "USER 10001:10001" in dockerfile
+    assert "exec ros2 run ferox_audio_go2 go2_audio_bridge" in bridge_entrypoint
+    assert "unsupported Go2 audio bridge argument" in bridge_entrypoint
+    assert "exec ros2 launch" not in bridge_entrypoint

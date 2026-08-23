@@ -17,7 +17,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 
 from .diagnostic_contract import validate_audio_diagnostic
-from .pcm_gate import PcmContractError, PcmGate
+from .pcm_gate import PcmContract, PcmContractError, PcmGate
 
 
 class AudioDomainGateway:
@@ -32,7 +32,9 @@ class AudioDomainGateway:
         self._robot_id = robot_id
         self._audio_topic = f"/ferox/{robot_id}/audio/speaker_out"
         self._diagnostic_topic = f"/ferox/{robot_id}/audio/diagnostics"
-        self._audio_gate = PcmGate()
+        # Ferox speech publishes its canonical speaker PCM at 22.05 kHz. The
+        # G1 voice bridge converts this to the Unitree 16 kHz API contract.
+        self._audio_gate = PcmGate(PcmContract(sample_rate=22_050))
         self._last_source_stamp_s: float | None = None
         self._audio_queue: queue.Queue = queue.Queue(maxsize=4)
         self._diagnostic_queue: queue.Queue = queue.Queue(maxsize=1)

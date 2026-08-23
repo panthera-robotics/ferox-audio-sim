@@ -13,6 +13,7 @@ import wave
 
 from .mic_bridge import MicIngressError, OpusDecoder, UlawDecoder
 from .profiles import get_profile
+from .signal_metrics import analyze_pcm_s16le, assert_no_speech_claim
 
 
 class CaptureDecodeError(ValueError):
@@ -166,6 +167,8 @@ def main(args=None) -> None:
     capture_sha256 = hashlib.sha256(Path(options.capture).read_bytes()).hexdigest()
     pcm, count, sample_rate = decode_frames(frames, profile_name=options.profile)
     rendered = wav_bytes(pcm, sample_rate=sample_rate)
+    metrics = analyze_pcm_s16le(pcm, sample_rate=sample_rate)
+    assert_no_speech_claim(metrics)
     probe = {
         "decoder": get_profile(options.profile).mic_codec,
         "decoded_frames": count,
@@ -176,6 +179,8 @@ def main(args=None) -> None:
         "operator_id": "REPLACE_AFTER_LISTENING",
         "capture_sha256": capture_sha256,
         "recording_sha256": hashlib.sha256(rendered).hexdigest(),
+        "signal_metrics": metrics,
+        "speech_claim_authorized": False,
     }
     write_decode_bundle(options.wav_output, options.probe_output, rendered, probe)
     print(json.dumps(probe, sort_keys=True))

@@ -79,6 +79,29 @@ def test_five_ulaw_frames_upsample_to_one_exact_chunk():
         )
     assert len(chunks) == 1
     assert len(chunks[0].payload) == 3_200
+    assert len(core.decode_latencies_ms) == 5
+    assert core.source_to_chunk_latencies_ms[0] == pytest.approx(80.0)
+
+
+def test_latency_telemetry_is_a_bounded_rolling_window():
+    profile = get_profile("go2_opus48_audiohub_v1")
+    core = Go2MicBridgeCore(
+        profile,
+        decoder=FakeDecoder(bytes(profile.mic_frame_samples * 2)),
+        stream_id_factory=lambda: "go2-mic-window",
+    )
+    for index in range(3_005):
+        core.ingest(
+            bytes(160), time_frame=index + 1,
+            receive_steady_s=30.0 + index * 0.02,
+            receive_time_ns=1_000 + index,
+        )
+    assert core.accepted_source_frames == 3_005
+    assert core.output_chunks == 601
+    assert len(core.decode_latencies_ms) == 3_000
+    assert core.decode_latencies_ms.maxlen == 3_000
+    assert len(core.source_to_chunk_latencies_ms) == 600
+    assert core.source_to_chunk_latencies_ms.maxlen == 600
 
 
 def test_receive_gap_starts_explicit_discontinuity_stream():

@@ -17,7 +17,7 @@ def main(args=None) -> None:
         from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
         from ferox_msgs.msg import AudioChunk
         from rclpy.node import Node
-        from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
         from unitree_api.msg import Request, Response
         from unitree_go.msg import AudioData
     except ImportError as exc:  # pragma: no cover - ROS image only
@@ -218,6 +218,11 @@ def main(args=None) -> None:
             "audiohub_responses_ok_total": transaction.responses_ok_total if transaction else 0,
         }
         assert set(counters) == set(COUNTERS)
+        decode_latencies = mic_core.decode_latencies_ms if mic_core else []
+        chunk_latencies = mic_core.source_to_chunk_latencies_ms if mic_core else []
+        percentile = lambda values, q: (
+            sorted(values)[min(len(values) - 1, int(q * (len(values) - 1)))]
+            if values else -1.0)
         report = audio_health_report(
             mic_enabled=mic_enabled,
             speaker_enabled=speaker_enabled,
@@ -230,6 +235,14 @@ def main(args=None) -> None:
             evidence_sha256=expected_sha,
             last_fault=latched_fault[0] if latched_fault else None,
             last_source_age_ms=age_ms,
+            decode_p50_ms=percentile(decode_latencies, 0.50),
+            decode_p95_ms=percentile(decode_latencies, 0.95),
+            decode_p99_ms=percentile(decode_latencies, 0.99),
+            decode_max_ms=max(decode_latencies) if decode_latencies else -1.0,
+            source_to_chunk_p50_ms=percentile(chunk_latencies, 0.50),
+            source_to_chunk_p95_ms=percentile(chunk_latencies, 0.95),
+            source_to_chunk_p99_ms=percentile(chunk_latencies, 0.99),
+            source_to_chunk_max_ms=max(chunk_latencies) if chunk_latencies else -1.0,
             counters=counters,
         )
         status = DiagnosticStatus()
@@ -244,9 +257,14 @@ def main(args=None) -> None:
         output.status = [status]
         diagnostic_pub.publish(output)
 
+    source_qos = QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=32,
+        reliability=ReliabilityPolicy.RELIABLE,
+    )
     source_sub = (
         node.create_subscription(
-            AudioData, str(g("source_topic")), on_source, qos_profile_sensor_data)
+            AudioData, str(g("source_topic")), on_source, source_qos)
         if mic_enabled else None)
     speaker_sub = (
         node.create_subscription(

@@ -4,10 +4,10 @@
     mic_enabled: false
     speaker_enabled: false
     robot_id: "go2_02"
-    hardware_profile: ""
-    runtime_firmware: ""
-    evidence_path: ""
-    evidence_sha256: ""
+    hardware_profile: "disabled"
+    runtime_firmware: "disabled"
+    evidence_path: "disabled"
+    evidence_sha256: "disabled"
     evidence_max_age_days: 30.0
     source_topic: "/audiosender"
     mic_topic: "audio/mic_raw"

@@ -31,10 +31,10 @@ services:
       - robot_id:=${ROBOT_ID:-go2_02}
       - mic_enabled:=${GO2_AUDIO_MIC_ENABLED:-false}
       - speaker_enabled:=${GO2_AUDIO_SPEAKER_ENABLED:-false}
-      - hardware_profile:=${GO2_AUDIO_PROFILE:-}
-      - runtime_firmware:=${GO2_AUDIO_RUNTIME_FIRMWARE:-}
+      - hardware_profile:=${GO2_AUDIO_PROFILE:-disabled}
+      - runtime_firmware:=${GO2_AUDIO_RUNTIME_FIRMWARE:-disabled}
       - evidence_path:=/run/ferox/go2-audio-evidence.json
-      - evidence_sha256:=${GO2_AUDIO_EVIDENCE_SHA256:-}
+      - evidence_sha256:=${GO2_AUDIO_EVIDENCE_SHA256:-disabled}
 
   audio_gateway:
     image: ${FEROX_AUDIO_GO2_IMAGE:?set FEROX_AUDIO_GO2_IMAGE to a validated immutable image reference}

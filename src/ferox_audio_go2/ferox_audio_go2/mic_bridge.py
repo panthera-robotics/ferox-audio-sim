@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import audioop
 from array import array
+from collections import deque
 import ctypes
 import ctypes.util
 from dataclasses import dataclass
@@ -200,6 +201,16 @@ class Go2MicBridgeCore:
         self.rejected_source_frames = 0
         self.output_chunks = 0
         self.discontinuities = 0
+        source_frame_s = profile.mic_frame_samples / profile.mic_sample_rate
+        if not 0.0 < source_frame_s <= 0.1:
+            raise ValueError("microphone frame duration is outside telemetry bounds")
+        # Diagnostics describe the recent transport/runtime condition, while
+        # the counters above remain lifetime totals.  A bounded rolling window
+        # prevents per-frame latency samples from growing for the lifetime of
+        # an always-on robot process.
+        self.decode_latencies_ms = deque(
+            maxlen=max(1, math.ceil(60.0 / source_frame_s)))
+        self.source_to_chunk_latencies_ms = deque(maxlen=600)
         self._reset_stream(discontinuity=False)
 
     def _new_stream_id(self) -> str:
@@ -218,6 +229,7 @@ class Go2MicBridgeCore:
         self._discontinuity_pending = bool(discontinuity)
         self._last_receive_s: float | None = None
         self._last_time_frame: int | None = None
+        self._pending_started_receive_s: float | None = None
         if discontinuity:
             self.discontinuities += 1
             self._decoder.reset()
@@ -262,17 +274,22 @@ class Go2MicBridgeCore:
         if self._last_time_frame is not None and time_frame <= self._last_time_frame:
             self.reject_and_reset("AudioData.time_frame did not increase")
         try:
+            decode_started = time.perf_counter_ns()
             decoded = self._decoder.decode(raw)
             expected_bytes = self.profile.mic_frame_samples * 2
             if len(decoded) != expected_bytes:
                 raise MicIngressError(
                     f"decoder produced {len(decoded)} bytes; expected {expected_bytes}")
             converted = self._converter.convert(decoded)
+            self.decode_latencies_ms.append(
+                (time.perf_counter_ns() - decode_started) / 1e6)
         except MicIngressError:
             self.rejected_source_frames += 1
             self._reset_stream(discontinuity=True)
             raise
 
+        if not self._pending and self._pending_started_receive_s is None:
+            self._pending_started_receive_s = receive_steady_s
         self._pending.extend(converted)
         self._last_receive_s = receive_steady_s
         self._last_time_frame = time_frame
@@ -295,11 +312,17 @@ class Go2MicBridgeCore:
                 receive_time_ns=receive_time_ns,
             )
             chunks.append(chunk)
+            if self._pending_started_receive_s is not None:
+                self.source_to_chunk_latencies_ms.append(
+                    max(0.0, (receive_steady_s -
+                              self._pending_started_receive_s) * 1000.0))
             self._sequence += 1
             self._sample_offset += 1_600
             self._started = True
             self._discontinuity_pending = False
             self.output_chunks += 1
+        if not self._pending:
+            self._pending_started_receive_s = None
         return chunks
 
 

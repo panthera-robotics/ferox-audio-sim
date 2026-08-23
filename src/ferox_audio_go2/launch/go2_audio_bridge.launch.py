@@ -26,10 +26,10 @@ def generate_launch_description():
         DeclareLaunchArgument("config_file", default_value=default_config),
         DeclareLaunchArgument("mic_enabled", default_value="false"),
         DeclareLaunchArgument("speaker_enabled", default_value="false"),
-        DeclareLaunchArgument("hardware_profile", default_value=""),
-        DeclareLaunchArgument("runtime_firmware", default_value=""),
-        DeclareLaunchArgument("evidence_path", default_value=""),
-        DeclareLaunchArgument("evidence_sha256", default_value=""),
+        DeclareLaunchArgument("hardware_profile", default_value="disabled"),
+        DeclareLaunchArgument("runtime_firmware", default_value="disabled"),
+        DeclareLaunchArgument("evidence_path", default_value="disabled"),
+        DeclareLaunchArgument("evidence_sha256", default_value="disabled"),
     ]
     return LaunchDescription([*declarations,
         GroupAction([

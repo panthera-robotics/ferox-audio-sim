@@ -64,7 +64,7 @@ _ROBOT_ID = re.compile(r"^go2_[0-9]{2}$")
 _PORTABLE = re.compile(r"^[A-Za-z0-9_.:+-]{1,128}$")
 _TOP_KEYS = {
     "schema_version", "robot_id", "hardware_profile", "source_firmware",
-    "source_topic", "source_type", "captured_utc", "observation",
+    "source_topic", "source_type", "subscriber_reliability", "captured_utc", "observation",
     "codec_probe", "speaker_probe",
 }
 
@@ -130,8 +130,8 @@ def validate_profile_evidence(
         extra = sorted(set(document) - _TOP_KEYS)
         raise ProfileEvidenceError(
             f"evidence top-level schema mismatch; missing={missing}, extra={extra}")
-    if document.get("schema_version") != 1:
-        raise ProfileEvidenceError("evidence schema_version must be 1")
+    if document.get("schema_version") != 2:
+        raise ProfileEvidenceError("evidence schema_version must be 2")
     if not _SHA256.fullmatch(document_sha256):
         raise ProfileEvidenceError("evidence SHA-256 must be 64 lowercase hex characters")
     if not _ROBOT_ID.fullmatch(robot_id) or document.get("robot_id") != robot_id:
@@ -146,6 +146,8 @@ def validate_profile_evidence(
         raise ProfileEvidenceError("qualified Go2 microphone topic must be /audiosender")
     if document.get("source_type") != "unitree_go/msg/AudioData":
         raise ProfileEvidenceError("qualified Go2 microphone type must be unitree_go/msg/AudioData")
+    if document.get("subscriber_reliability") != "reliable":
+        raise ProfileEvidenceError("qualified Go2 microphone capture must use reliable QoS")
 
     captured = _parse_utc(document.get("captured_utc"))
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -161,8 +163,11 @@ def validate_profile_evidence(
     expected_observation_keys = {
         "duration_s", "frame_count", "nonempty_ratio", "payload_bytes_mode",
         "payload_bytes_min", "payload_bytes_max", "interval_p50_ms",
-        "interval_p95_ms", "time_frame_monotonic", "framed_payload_sha256",
-        "capture_sha256",
+        "interval_p95_ms", "interval_p99_ms", "interval_max_ms",
+        "effective_rate_hz", "receive_gap_count", "receive_gap_fraction",
+        "receive_burst_count", "receive_burst_fraction",
+        "time_frame_monotonic", "time_frame_step_mode",
+        "time_frame_step_outlier_count", "framed_payload_sha256", "capture_sha256",
     }
     if set(observation) != expected_observation_keys:
         raise ProfileEvidenceError("observation schema mismatch")
@@ -187,12 +192,45 @@ def validate_profile_evidence(
     if not _SHA256.fullmatch(str(observation.get("capture_sha256", ""))):
         raise ProfileEvidenceError("observation capture_sha256 is invalid")
     expected_ms = profile.frame_duration_ms
+    expected_rate_hz = 1000.0 / expected_ms
+    effective_rate_hz = _number(observation, "effective_rate_hz")
+    if not expected_rate_hz * 0.98 <= effective_rate_hz <= expected_rate_hz * 1.02:
+        raise ProfileEvidenceError("audio effective frame rate does not match the profile")
     p50 = _number(observation, "interval_p50_ms")
     p95 = _number(observation, "interval_p95_ms")
+    p99 = _number(observation, "interval_p99_ms")
+    interval_max = _number(observation, "interval_max_ms")
     if not expected_ms * 0.70 <= p50 <= expected_ms * 1.30:
         raise ProfileEvidenceError("audio frame median cadence does not match the profile")
-    if not p50 <= p95 <= expected_ms * 2.0:
-        raise ProfileEvidenceError("audio frame p95 cadence is outside the profile bound")
+    if not 0 <= p50 <= p95 <= p99 <= interval_max:
+        raise ProfileEvidenceError("audio receive interval percentiles are inconsistent")
+    # The current Go2 transport delivers complete source frames in scheduler
+    # bursts.  Source timestamp continuity is the loss gate; receive intervals
+    # remain a bounded transport-latency signal and must never be mistaken for
+    # source-frame loss.
+    if p99 > expected_ms * 4.0 or interval_max > expected_ms * 5.0:
+        raise ProfileEvidenceError("audio receive transport stall exceeds 100 ms")
+    interval_count = max(1, frame_count - 1)
+    for count_key, fraction_key in (
+        ("receive_gap_count", "receive_gap_fraction"),
+        ("receive_burst_count", "receive_burst_fraction"),
+    ):
+        count_value = _number(observation, count_key)
+        fraction = _number(observation, fraction_key)
+        if not count_value.is_integer() or not 0 <= count_value <= frame_count - 1:
+            raise ProfileEvidenceError(f"{count_key} is invalid")
+        if not 0.0 <= fraction <= 1.0:
+            raise ProfileEvidenceError(f"{fraction_key} is invalid")
+        expected_fraction = int(count_value) / interval_count
+        if not math.isclose(fraction, expected_fraction, abs_tol=1e-6):
+            raise ProfileEvidenceError(
+                f"{fraction_key} does not match {count_key}")
+    source_outliers = _number(observation, "time_frame_step_outlier_count")
+    if not source_outliers.is_integer() or source_outliers != 0:
+        raise ProfileEvidenceError("AudioData.time_frame step is inconsistent")
+    source_step = observation.get("time_frame_step_mode")
+    if isinstance(source_step, bool) or not isinstance(source_step, int) or source_step <= 0:
+        raise ProfileEvidenceError("AudioData.time_frame step mode is invalid")
     if observation.get("time_frame_monotonic") is not True:
         raise ProfileEvidenceError("AudioData.time_frame was not monotonic during qualification")
 

@@ -89,7 +89,23 @@ def test_decode_bundle_never_leaves_a_partial_result(tmp_path):
     assert probe_output.read_text() == "owned-by-operator\n"
 
 
-def test_decode_bundle_requires_distinct_outputs(tmp_path):
+def test_decode_main_writes_physical_metrics_and_refuses_speech_claim(tmp_path):
+    source = tmp_path / "frames.jsonl"
+    write_capture(source, [bytes([255]) * 160 for _ in range(3)])
+    wav_output = tmp_path / "decoded.wav"
+    probe_output = tmp_path / "probe.json"
+    from ferox_audio_go2.decode_capture import main as decode_main
+    decode_main([
+        "--capture", str(source),
+        "--profile", "go2_ulaw8_mic_only",
+        "--wav-output", str(wav_output),
+        "--probe-output", str(probe_output),
+    ])
+    probe = json.loads(probe_output.read_text())
+    assert probe["speech_claim_authorized"] is False
+    assert probe["operator_audio_intelligible"] is False
+    assert probe["signal_metrics"]["interpretation"] == "physical_pcm_only"
+    assert probe["signal_metrics"]["sample_count"] == 480
     output = tmp_path / "same"
     with pytest.raises(CaptureDecodeError, match="distinct"):
         write_decode_bundle(output, output, b"wav", {"ok": True})
