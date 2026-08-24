@@ -46,7 +46,10 @@ def main(args=None) -> None:
         ("max_utterance_s", 30.0),
     ):
         node.declare_parameter(name, default)
-    g = lambda name: node.get_parameter(name).value
+
+    def g(name):
+        return node.get_parameter(name).value
+
     mic_enabled = bool(g("mic_enabled"))
     speaker_enabled = bool(g("speaker_enabled"))
     robot_id = str(g("robot_id"))
@@ -220,9 +223,13 @@ def main(args=None) -> None:
         assert set(counters) == set(COUNTERS)
         decode_latencies = mic_core.decode_latencies_ms if mic_core else []
         chunk_latencies = mic_core.source_to_chunk_latencies_ms if mic_core else []
-        percentile = lambda values, q: (
-            sorted(values)[min(len(values) - 1, int(q * (len(values) - 1)))]
-            if values else -1.0)
+
+        def percentile(values, q):
+            return (
+                sorted(values)[min(len(values) - 1, int(q * (len(values) - 1)))]
+                if values else -1.0
+            )
+
         report = audio_health_report(
             mic_enabled=mic_enabled,
             speaker_enabled=speaker_enabled,
@@ -276,9 +283,17 @@ def main(args=None) -> None:
         if speaker_enabled else None)
     tick_timer = node.create_timer(0.01, tick_audiohub) if speaker_enabled else None
     diagnostic_timer = node.create_timer(1.0, publish_diagnostic)
+    keepalive = (
+        source_sub,
+        speaker_sub,
+        response_sub,
+        tick_timer,
+        diagnostic_timer,
+    )
     node.get_logger().info(
         f"Go2 audio adapter started for {robot_id}: profile={profile_name or '<disabled>'} "
-        f"mic={mic_enabled} speaker={speaker_enabled}")
+        f"mic={mic_enabled} speaker={speaker_enabled} "
+        f"entities={sum(entity is not None for entity in keepalive)}")
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -31,7 +31,8 @@ def generate_launch_description():
         DeclareLaunchArgument("evidence_path", default_value="disabled"),
         DeclareLaunchArgument("evidence_sha256", default_value="disabled"),
     ]
-    return LaunchDescription([*declarations,
+    return LaunchDescription([
+        *declarations,
         GroupAction([
             PushRosNamespace(["/ferox/", robot_id]),
             Node(

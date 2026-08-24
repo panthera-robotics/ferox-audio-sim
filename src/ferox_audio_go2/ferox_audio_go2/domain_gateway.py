@@ -12,7 +12,6 @@ import re
 import threading
 import time
 
-import rclpy
 from diagnostic_msgs.msg import DiagnosticArray
 from ferox_msgs.msg import AudioChunk
 from rclpy.context import Context
