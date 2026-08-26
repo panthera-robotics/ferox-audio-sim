@@ -216,6 +216,11 @@ def _container_identity(
     ):
         raise StrictTimingError("container inspect evidence is missing command fields")
     command = " ".join(command_parts)
+    collector_implementation = (
+        "rclcpp_native" if "go2_audio_native_timing_probe" in command
+        else "rclpy" if "go2_audio_readonly_discovery" in command
+        else "unknown"
+    )
     cap_drop = host_config.get("CapDrop")
     security_options = host_config.get("SecurityOpt")
     return {
@@ -235,9 +240,15 @@ def _container_identity(
         "clean_exit": (
             state.get("ExitCode") == 0 and state.get("OOMKilled") is False
         ),
+        "collector_implementation": collector_implementation,
         "readonly_collector_command": (
-            "go2_audio_readonly_discovery" in command
+            collector_implementation in {"rclpy", "rclcpp_native"}
             and f"--qos-reliability {expected_reliability}" in command
+            and "--frames-output " in command
+            and (
+                collector_implementation == "rclpy"
+                or "--metadata-output " in command
+            )
             and all(forbidden not in command for forbidden in (
                 "speaker_probe", "audiohub/request", "audioreceiver",
             ))

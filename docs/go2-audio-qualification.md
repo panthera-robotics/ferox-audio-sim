@@ -141,7 +141,8 @@ latency/intent, venue-acoustics, and Arabic/English runs from FRX-PLAN-001.
 
 ## 7. HATS + 1 m spoken (later; do not run from this document tonight)
 
-`ferox-audio-go2` has **no AEC canceller**. AEC gates stay
+The live `ferox-audio-go2` bridge has **no production in-path AEC**. The offline
+AEC3 engineering tool is not an acoustic-loop qualification, so AEC gates stay
 `missing_measurement`. `speaker_enable_authorized=false`. Empty-room 180 s
 WAV `388b4e31…` is idle noise, **not WER**. Do not unmute the speaker, do
 not call AudioHub 4001/4003 or G1 PlayStream 1001/1003/1006, and do not

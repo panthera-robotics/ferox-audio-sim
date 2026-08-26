@@ -1,9 +1,10 @@
-"""Go2 has no acoustic echo canceller. Fail-closed stub.
+"""Go2 has no production in-path acoustic echo canceller. Fail-closed stub.
 
-This package publishes/subscribes PCM. It does not implement NLMS, WebRTC
-AEC, SpeexDSP, or any other canceller. Engineering ERLE scripts (energy
-ratio of far-end vs residual) are not ETSI ES 202 738 TCLw and are not
-ITU-T P.340 TELRDT. Calling this module never enables the speaker.
+The live bridge only publishes/subscribes PCM and does not run a canceller.
+The separate native WebRTC AEC3 offline tool produces bounded engineering
+evidence, but it is not connected to the robot acoustic loop and cannot satisfy
+ETSI ES 202 738 TCLw or ITU-T P.340 TELRDT. Calling this module never enables
+the speaker.
 """
 from __future__ import annotations
 
@@ -47,7 +48,7 @@ def aec_unavailable(evidence: Mapping[str, object] | None = None) -> dict[str, o
     """Return the fail-closed AEC interface. Always missing_measurement.
 
     Injected tclw_db / erle_db / hats_campaign values are ignored: this
-    adapter has no canceller to measure. speaker_enable_authorized stays
+    live adapter has no in-path canceller to measure. speaker_enable_authorized stays
     false. production_ready stays false.
     """
     del evidence
@@ -78,7 +79,7 @@ def aec_unavailable(evidence: Mapping[str, object] | None = None) -> dict[str, o
         "passed": False,
         "gates": gates,
         "reason": (
-            "ferox-audio-go2 has no AEC module; aec_tclw_db, "
+            "ferox-audio-go2 has no production in-path AEC module; aec_tclw_db, "
             "aec_p340_telrdt_db, and aec_far_end_erle_db remain "
             "missing_measurement; speaker_enable_authorized=false; "
             "engineering ERLE is not ETSI TCLw"
@@ -89,7 +90,7 @@ def aec_unavailable(evidence: Mapping[str, object] | None = None) -> dict[str, o
 def refuse_engineering_erle_as_tclw(*_args, **_kwargs) -> None:
     """Hard stop: do not compute ERLE here and do not label it TCLw."""
     raise AecUnavailableError(
-        "ferox-audio-go2 has no canceller; engineering ERLE scripts are "
+        "ferox-audio-go2 has no production in-path canceller; offline engineering ERLE is "
         "not ETSI ES 202 738 / TS 103 738 TCLw and never authorize the speaker"
     )
 

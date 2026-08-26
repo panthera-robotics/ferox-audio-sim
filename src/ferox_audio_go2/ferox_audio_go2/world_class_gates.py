@@ -2,8 +2,9 @@
 
 Transport PASS does not qualify speech. Firmware + operator intelligibility
 + live WER + speaker probe must all be present. This module never enables
-speaker or motion. There is no AEC canceller in ferox-audio-go2; AEC gates
-stay missing_measurement and speaker_enable_authorized stays false.
+speaker or motion. The live Go2 bridge has no production in-path AEC; the
+offline AEC3 tool cannot satisfy acoustic-loop gates, which stay
+missing_measurement, and speaker_enable_authorized stays false.
 """
 from __future__ import annotations
 
@@ -163,7 +164,8 @@ def evaluate_go2_hardware_production(evidence: Mapping[str, object]) -> dict[str
             "strict transport latency, firmware, operator intelligibility, live "
             "multilingual WER, and supervised speaker "
             "evidence all pass; AEC gates are missing_measurement because "
-            "ferox-audio-go2 has no canceller; this evaluator never flips "
+            "the live Go2 bridge has no production in-path canceller; the offline "
+            "AEC3 tool cannot replace HATS; this evaluator never flips "
             "enablement bits and never claims ETSI TCLw"
         ),
     }

@@ -3,7 +3,9 @@
 **Status: recipe only. Do not execute this capture now.**
 
 `production_ready=false`. `speaker_enable_authorized=false`. `control_authorized=false`.
-`ferox-audio-go2` has **no AEC module**. AEC gates stay `missing_measurement`.
+The live `ferox-audio-go2` bridge has **no production in-path AEC**. The separate
+offline AEC3 engineering tool does not close the acoustic-loop/HATS gates, so
+they stay `missing_measurement`.
 Engineering ERLE is **not** ETSI TCLw. This document does not authorize
 speaker unmute, G1 PlayStream, AudioHub, TTS playback, or a live campaign.
 
