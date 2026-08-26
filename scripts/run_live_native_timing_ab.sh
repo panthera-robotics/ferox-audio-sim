@@ -34,7 +34,8 @@ if ! docker image inspect "${image}" >/dev/null 2>&1; then
   exit 66
 fi
 
-mkdir -m 0750 -p "${evidence_root}/reliable" "${evidence_root}/best_effort"
+mkdir -m 0750 "${evidence_root}"
+mkdir -m 0750 "${evidence_root}/reliable" "${evidence_root}/best_effort"
 sha256sum "$0" >"${evidence_root}/runner-sha256.txt"
 {
   printf 'hostname='

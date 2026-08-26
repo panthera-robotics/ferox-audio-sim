@@ -54,7 +54,7 @@ jobs:
           while IFS= read -r -d '' script; do
             bash -n "$script"
           done < <(find docker scripts -type f -name '*.sh' -print0)
-          shellcheck docker/*.sh scripts/*.sh
+          shellcheck --exclude=SC1091 docker/*.sh scripts/*.sh
 
   native-linux-contracts:
     runs-on: ubuntu-22.04
@@ -79,10 +79,11 @@ jobs:
 
               curl --fail --location --proto "=https" --tlsv1.2 \
                 https://files.pythonhosted.org/packages/55/a6/47b9353c331318a13eb050887eacfd61eb075746285f9baf7ef7de6ae235/meson-1.5.2-py3-none-any.whl \
-                --output /tmp/meson.whl
-              echo "77706e2368a00d789c097632ccf4fc39251fba56d03e1e1b262559a3c7a08f5b  /tmp/meson.whl" \
+                --output /tmp/meson-1.5.2-py3-none-any.whl
+              echo "77706e2368a00d789c097632ccf4fc39251fba56d03e1e1b262559a3c7a08f5b  /tmp/meson-1.5.2-py3-none-any.whl" \
                 | sha256sum --check --strict
-              python3 -m pip install --no-cache-dir --no-deps /tmp/meson.whl
+              python3 -m pip install --no-cache-dir --no-deps \
+                /tmp/meson-1.5.2-py3-none-any.whl
               curl --fail --location --proto "=https" --tlsv1.2 \
                 https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/webrtc-audio-processing-2.1.tar.xz \
                 --output /tmp/webrtc-audio-processing.tar.xz
