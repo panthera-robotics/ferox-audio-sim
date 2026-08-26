@@ -128,6 +128,7 @@ def test_arm64_image_builds_exact_unitree_commit_and_runs_gates():
     assert "UNITREE_ROS2_REF=668d1ec5a05d1c38d3306bdca7d59f2ba3581a88" in dockerfile
     assert "--packages-select unitree_go unitree_api" in dockerfile
     assert "python3 -m pytest -q /workspace/src/ferox_audio_go2/test" in dockerfile
+    assert "docs/hats-1m-spoken-runbook.md /workspace/docs/" in dockerfile
     assert "ros_go2_audio_domain_gateway_smoke.py" in dockerfile
     assert "exec ros2 run ferox_audio_go2 go2_audio_domain_gateway" in dockerfile
     assert "> /entrypoint-go2-gateway.sh" in dockerfile

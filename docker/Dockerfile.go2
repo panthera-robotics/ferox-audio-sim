@@ -32,6 +32,7 @@ RUN mkdir -p /unitree_ws/src \
 WORKDIR /workspace
 COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
 COPY src/ferox_audio_go2 /workspace/src/ferox_audio_go2
+COPY docs/hats-1m-spoken-runbook.md /workspace/docs/hats-1m-spoken-runbook.md
 COPY docker/Dockerfile.go2 docker/entrypoint-g1-dds.sh \
      docker/entrypoint-go2-bridge.sh \
      docker/docker-compose.go2.yml /workspace/docker/

@@ -64,17 +64,18 @@ Do **not** start this phase from the 2026-08-20T21:34Z session.
 
 Standards (primary, not blogs):
 
-- [ETSI ES 202 738](https://www.etsi.org/deliver/etsi_es/202700_202799/202738/01.08.01_60/es_202738v010801p.pdf) — TCLw (weighted terminal coupling loss)
+- [ETSI ES 202 738 V1.8.2](https://www.etsi.org/deliver/etsi_es/202700_202799/202738/01.08.02_60/es_202738v010802p.pdf) — TCLw (weighted terminal coupling loss)
 - [ETSI TS 103 738](https://www.etsi.org/deliver/etsi_TS/103700_103799/103738/01.04.01_60/ts_103738v010401p.pdf) — test implementation / HATS procedure
 - [ITU-T G.122](https://www.itu.int/rec/T-REC-G.122/en) trapezoidal weighting
-- [ITU-T P.501](https://www.itu.int/rec/T-REC-P.501/en) speech
+- [ITU-T P.581 (07/2022)](https://www.itu.int/rec/T-REC-P.581/en) HATS positioning and calibration
+- [ITU-T P.501 (04/2025)](https://www.itu.int/rec/T-REC-P.501/en) speech
 - [ITU-T P.340](https://www.itu.int/rec/T-REC-P.340/en) Type 1 double-talk TELRDT
 
 Bars (fail-closed; missing measurement = fail):
 
 | Gate | Bar | Notes |
 | --- | --- | --- |
-| `aec_tclw_db` | ≥ 46 dB (recommended 50 dB) | ES 202 738 TCLw. **Not ERLE.** |
+| `aec_tclw_db` | ≥ 46 dB at every volume setting (recommended 50 dB) | ES 202 738 TCLw. **Not ERLE.** |
 | `aec_p340_telrdt_db` | ≥ 37 dB | P.340 Type 1 |
 | `aec_far_end_erle_db` | ≥ 20 dB | Engineering floor only; never qualifies duplex |
 | Scenarios | far-end single talk, near-end single talk, double talk | ≥3 events and ≥30 s each |
@@ -83,7 +84,7 @@ Bars (fail-closed; missing measurement = fail):
 
 Lab:
 
-- HATS at the specified mouth/ear positions (TS 103 738).
+- Calibrated HATS at the specified mouth/ear positions, with horizontal positioning error within ±2° (P.581 / TS 103 738).
 - Three scenarios above. Do not substitute “play a WAV in an empty room.”
 - **Speaker still requires a human in the loop:** supervised safe volume, operator heard the test phrase, no delayed replay for 10 s. Until those flags are true, do not run `go2_audio_speaker_probe`, do not set `GO2_AUDIO_SPEAKER_ENABLED=true`, do not publish AudioHub 4001/4003.
 - Implement a **real canceller** in software/firmware **before** scoring TCLw. `aec_unavailable` will keep reporting `missing_measurement` until a canceller exists. Measuring idle PCM against an ERLE script does not create one.
