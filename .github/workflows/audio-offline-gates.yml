@@ -54,4 +54,3 @@ jobs:
           while IFS= read -r -d '' script; do
             bash -n "$script"
           done < <(find docker scripts -type f -name '*.sh' -print0)
-
