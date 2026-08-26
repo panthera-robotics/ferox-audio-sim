@@ -110,12 +110,16 @@ jobs:
               git -C /native_ws/src/unitree_ros2 checkout --detach \
                 668d1ec5a05d1c38d3306bdca7d59f2ba3581a88
               cp -a /repo/src/ferox_audio_go2_native /native_ws/src/
+              set +u
               source /opt/ros/humble/setup.bash
+              set -u
               cd /native_ws
               colcon build --merge-install \
                 --packages-select unitree_go unitree_api ferox_audio_go2_native \
                 --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+              set +u
               source /native_ws/install/setup.bash
+              set -u
               ldd /native_ws/install/lib/ferox_audio_go2_native/go2_audio_aec3_offline \
                 | tee /tmp/ldd.txt
               ! grep -F "not found" /tmp/ldd.txt
