@@ -1,0 +1,57 @@
+name: Audio offline gates
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - "kevin/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audio-offline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pure-python-contracts:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install bounded test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopus0
+          python -m pip install --disable-pip-version-check "pytest==8.3.5"
+
+      - name: Compile and reject malformed diffs
+        run: |
+          python -m compileall -q \
+            src/ferox_audio_sim/ferox_audio_sim \
+            src/ferox_audio_g1/ferox_audio_g1 \
+            src/ferox_audio_go2/ferox_audio_go2
+          git diff --check "$(git merge-base origin/main HEAD)" HEAD
+
+      - name: Run all backend contracts together
+        run: python -m pytest -q
+
+      - name: Check shell syntax
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(find docker scripts -type f -name '*.sh' -print0)
+

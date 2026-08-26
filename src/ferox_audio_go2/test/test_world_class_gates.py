@@ -62,6 +62,14 @@ def test_go2_hardware_gate_fails_closed_on_template_evidence():
     assert report["control_authorized"] is False
     assert "firmware_fingerprint_present" in report["failures"]
     assert "operator_intelligible" in report["failures"]
+    assert "transport_certificate_policy_matches" in report["failures"]
+    assert "transport_policy_source_digest_present" in report["failures"]
+    assert "transport_inputs_digest_bound" in report["failures"]
+    assert "transport_certificate_fail_closed" in report["failures"]
+    assert "transport_integrity_passed" in report["failures"]
+    assert "strict_transport_gate_passed" in report["failures"]
+    assert "transport_flags_match_checks" in report["failures"]
+    assert "transport_reliable_capture_matches_codec" in report["failures"]
     assert "live_speech_campaign_present" in report["failures"]
     assert "speaker_probe_supervised" in report["failures"]
     assert "aec_hats_campaign_present" in report["failures"]
@@ -78,6 +86,59 @@ def test_go2_hardware_gate_fails_closed_on_template_evidence():
     }
     assert all(gate["reason"] == "missing_measurement" for gate in aec["gates"])
     assert all(gate["measured"] is None for gate in aec["gates"])
+
+
+def test_go2_hardware_gate_verifies_transport_certificate_internals():
+    digest = "a" * 64
+    binding = {"sha256": "b" * 64, "size_bytes": 10, "path": "/evidence.json"}
+    evidence = {
+        "control_authorized": False,
+        "source_firmware": "1.2.3",
+        "codec_probe": {
+            "operator_audio_intelligible": True,
+            "operator_id": "operator-1",
+            "capture_sha256": digest,
+            "recording_sha256": "c" * 64,
+        },
+        "observation": {"capture_sha256": digest},
+        "live_wer": {"campaign": "present"},
+        "transport_certificate": {
+            "policy_id": "ferox-go2-audio-transport-v1",
+            "policy_source_sha256": "d" * 64,
+            "production_ready": False,
+            "speaker_enable_authorized": False,
+            "control_authorized": False,
+            "transport_integrity_passed": True,
+            "strict_transport_gate_passed": True,
+            "checks": {
+                "reliable_all_frames_decoded": True,
+                "reliable_receive_interval_p95_at_most_40ms": True,
+                "best_effort_receive_interval_p95_at_most_40ms": True,
+            },
+            "inputs": {
+                name: dict(binding) for name in (
+                    "reliable_observation", "reliable_codec",
+                    "best_effort_observation", "best_effort_codec",
+                )
+            },
+            "lanes": {"reliable": {"capture_sha256": digest}},
+        },
+        "speaker_probe": {
+            "operator_heard_test_phrase": True,
+            "operator_confirmed_no_delayed_replay_10s": True,
+            "confirm_supervised_safe_volume": True,
+        },
+    }
+    report = evaluate_go2_hardware_production(evidence)
+    assert report["checks"]["transport_certificate_policy_matches"] is True
+    assert report["checks"]["transport_policy_source_digest_present"] is True
+    assert report["checks"]["transport_inputs_digest_bound"] is True
+    assert report["checks"]["transport_certificate_fail_closed"] is True
+    assert report["checks"]["transport_integrity_passed"] is True
+    assert report["checks"]["strict_transport_gate_passed"] is True
+    assert report["checks"]["transport_flags_match_checks"] is True
+    assert report["checks"]["transport_reliable_capture_matches_codec"] is True
+    assert report["production_ready"] is False
 
 
 def test_aec_unavailable_ignores_injected_tclw_and_refuses_erle():

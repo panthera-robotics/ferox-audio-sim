@@ -34,10 +34,46 @@ def evaluate_go2_hardware_production(evidence: Mapping[str, object]) -> dict[str
     codec = evidence.get("codec_probe")
     speaker = evidence.get("speaker_probe")
     observation = evidence.get("observation")
+    transport = evidence.get("transport_certificate")
     if not isinstance(codec, Mapping):
         codec = {}
     if not isinstance(observation, Mapping):
         observation = {}
+    if not isinstance(transport, Mapping):
+        transport = {}
+    transport_checks = transport.get("checks")
+    transport_inputs = transport.get("inputs")
+    transport_lanes = transport.get("lanes")
+    if not isinstance(transport_checks, Mapping):
+        transport_checks = {}
+    if not isinstance(transport_inputs, Mapping):
+        transport_inputs = {}
+    if not isinstance(transport_lanes, Mapping):
+        transport_lanes = {}
+    transport_reliable = transport_lanes.get("reliable")
+    if not isinstance(transport_reliable, Mapping):
+        transport_reliable = {}
+    latency_suffix = "receive_interval_p95_at_most_40ms"
+    integrity_values = [
+        passed for name, passed in transport_checks.items()
+        if not str(name).endswith(latency_suffix)
+    ]
+    calculated_integrity = bool(integrity_values) and all(
+        passed is True for passed in integrity_values)
+    calculated_strict = calculated_integrity and all(
+        passed is True for passed in transport_checks.values())
+    required_transport_inputs = {
+        "reliable_observation", "reliable_codec",
+        "best_effort_observation", "best_effort_codec",
+    }
+    inputs_bound = required_transport_inputs.issubset(transport_inputs) and all(
+        isinstance(transport_inputs.get(name), Mapping)
+        and _digest(transport_inputs[name].get("sha256"))
+        and isinstance(transport_inputs[name].get("size_bytes"), int)
+        and not isinstance(transport_inputs[name].get("size_bytes"), bool)
+        and transport_inputs[name]["size_bytes"] > 0
+        for name in required_transport_inputs
+    )
     firmware_ok = not _placeholder(evidence.get("source_firmware"))
     intelligible = codec.get("operator_audio_intelligible") is True
     operator_id_ok = not _placeholder(codec.get("operator_id"))
@@ -77,6 +113,26 @@ def evaluate_go2_hardware_production(evidence: Mapping[str, object]) -> dict[str
         "capture_sha256_present": capture_ok,
         "recording_sha256_present": recording_ok,
         "observation_capture_matches_codec": hashes_agree,
+        "transport_certificate_policy_matches": transport.get("policy_id") == "ferox-go2-audio-transport-v1",
+        "transport_policy_source_digest_present": _digest(
+            transport.get("policy_source_sha256")),
+        "transport_inputs_digest_bound": inputs_bound is True,
+        "transport_certificate_fail_closed": (
+            transport.get("production_ready") is False
+            and transport.get("speaker_enable_authorized") is False
+            and transport.get("control_authorized") is False
+        ),
+        "transport_integrity_passed": transport.get("transport_integrity_passed") is True,
+        "strict_transport_gate_passed": transport.get("strict_transport_gate_passed") is True,
+        "transport_flags_match_checks": (
+            transport.get("transport_integrity_passed") is calculated_integrity
+            and transport.get("strict_transport_gate_passed") is calculated_strict
+        ),
+        "transport_reliable_capture_matches_codec": (
+            _digest(transport_reliable.get("capture_sha256"))
+            and _text(transport_reliable.get("capture_sha256"))
+            == _text(codec.get("capture_sha256"))
+        ),
         "live_speech_campaign_present": live_campaign is True,
         "speaker_probe_supervised": speaker_ready,
         "speech_claim_not_fabricated_without_operator": (
@@ -103,8 +159,9 @@ def evaluate_go2_hardware_production(evidence: Mapping[str, object]) -> dict[str
         "checks": checks,
         "failures": failures,
         "reason": (
-            "hardware production remains fail-closed until firmware, operator "
-            "intelligibility, live multilingual WER, and supervised speaker "
+            "hardware production remains fail-closed until digest-bound transport, "
+            "strict transport latency, firmware, operator intelligibility, live "
+            "multilingual WER, and supervised speaker "
             "evidence all pass; AEC gates are missing_measurement because "
             "ferox-audio-go2 has no canceller; this evaluator never flips "
             "enablement bits and never claims ETSI TCLw"
