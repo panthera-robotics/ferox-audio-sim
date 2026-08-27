@@ -37,6 +37,7 @@ setup(
         "go2_audio_hats_certificate = ferox_audio_go2.hats_certificate:main",
         "go2_audio_prepare_speaker_probe = ferox_audio_go2.speaker_probe:prepare_main",
         "go2_audio_speaker_probe = ferox_audio_go2.speaker_probe:main",
+        "go2_audio_acoustic_latency = ferox_audio_go2.acoustic_latency:main",
         "go2_audio_domain_gateway = ferox_audio_go2.domain_gateway:main",
     ]},
 )

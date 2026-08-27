@@ -9,6 +9,7 @@ import json
 import math
 import os
 from pathlib import Path
+import platform
 import re
 import secrets
 import time
@@ -128,6 +129,14 @@ def _replace_owned_result(path: Path, result: dict) -> None:
         handle.write((json.dumps(result, indent=2, sort_keys=True) + "\n").encode())
 
 
+def _host_boot_id() -> str:
+    path = Path("/proc/sys/kernel/random/boot_id")
+    value = path.read_text(encoding="ascii").strip()
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", value):
+        raise SpeakerProbeError("Linux boot_id is unavailable or malformed")
+    return value
+
+
 def prepare_main(args=None) -> None:
     """Offline-only canonicalization step; imports no ROS and publishes nothing."""
     parser = argparse.ArgumentParser()
@@ -157,6 +166,7 @@ def main(args=None) -> None:
     parser.add_argument("--operator-id", required=True)
     parser.add_argument("--confirm-supervised-safe-volume", action="store_true")
     parser.add_argument("--response-timeout-s", type=float, default=2.0)
+    parser.add_argument("--latency-capture-token")
     options = parser.parse_args(args)
     if not _ROBOT_ID.fullmatch(options.robot_id):
         parser.error("--robot-id must look like go2_02")
@@ -174,6 +184,9 @@ def main(args=None) -> None:
         parser.error("speaker qualification requires an explicit FEROX_DDS_INTERFACE")
     if not os.environ.get("CYCLONEDDS_URI"):
         parser.error("speaker qualification requires a rendered CYCLONEDDS_URI")
+    if (options.latency_capture_token is not None
+            and not _PORTABLE.fullmatch(options.latency_capture_token)):
+        parser.error("--latency-capture-token is invalid")
     try:
         output = _preflight_output(options.output)
         plan, metadata = prepare_probe_wav(
@@ -193,6 +206,9 @@ def main(args=None) -> None:
         "started_utc": datetime.now(timezone.utc).isoformat().replace(
             "+00:00", "Z"),
         "hardware_publish_started": False,
+        "host_boot_id": _host_boot_id(),
+        "host_name": platform.node(),
+        "latency_capture_token": options.latency_capture_token,
     }
     _write_result(output, attempt)
 
@@ -214,6 +230,7 @@ def main(args=None) -> None:
         timeout_s=options.response_timeout_s,
         identity_seed=secrets.randbelow(2**31),
     )
+    request_publish_events = []
 
     def on_response(message) -> None:
         transaction.acknowledge(
@@ -247,7 +264,15 @@ def main(args=None) -> None:
                 request.header.identity.api_id = pending.api_id
                 request.parameter = pending.parameter
                 request.binary = []
+                publish_steady_ns = time.monotonic_ns()
+                publish_system_ns = time.time_ns()
                 publisher.publish(request)
+                request_publish_events.append({
+                    "api_id": pending.api_id,
+                    "identity": pending.identity,
+                    "publish_steady_ns": publish_steady_ns,
+                    "publish_system_ns": publish_system_ns,
+                })
             rclpy.spin_once(node, timeout_sec=0.01)
         if transaction.latched_fault:
             raise RuntimeError(transaction.latched_fault)
@@ -269,6 +294,10 @@ def main(args=None) -> None:
                 "request_count": metadata["request_count"],
                 "responses_ok": transaction.responses_ok_total,
                 "post_playback_observation_s": 10.0,
+                "host_boot_id": attempt["host_boot_id"],
+                "host_name": attempt["host_name"],
+                "latency_capture_token": options.latency_capture_token,
+                "request_publish_events": request_publish_events,
             },
             "speaker_probe": {
                 "protocol": "audiohub_v1",

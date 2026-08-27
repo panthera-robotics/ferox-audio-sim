@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -32,6 +33,7 @@ struct Options {
   std::string reliability = "reliable";
   std::filesystem::path frames_output;
   std::filesystem::path metadata_output;
+  std::string supervised_speaker_capture_token;
 };
 
 class ExclusiveFile {
@@ -107,6 +109,8 @@ Options ParseOptions(int argc, char **argv) {
       options.frames_output = RequireValue(argc, argv, &index);
     } else if (argument == "--metadata-output") {
       options.metadata_output = RequireValue(argc, argv, &index);
+    } else if (argument == "--supervised-speaker-capture-token") {
+      options.supervised_speaker_capture_token = RequireValue(argc, argv, &index);
     } else if (argument == "--ros-args") {
       break;
     } else {
@@ -126,7 +130,24 @@ Options ParseOptions(int argc, char **argv) {
           std::filesystem::absolute(options.metadata_output)) {
     throw std::runtime_error("distinct --frames-output and --metadata-output are required");
   }
+  if (options.supervised_speaker_capture_token.size() > 128U ||
+      options.supervised_speaker_capture_token.find_first_not_of(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:+-") !=
+        std::string::npos) {
+    throw std::runtime_error(
+      "--supervised-speaker-capture-token contains unsupported characters");
+  }
   return options;
+}
+
+std::string ReadBootId() {
+  std::ifstream input("/proc/sys/kernel/random/boot_id");
+  std::string value;
+  if (!input.good() || !std::getline(input, value) || value.size() != 36U ||
+      value.find_first_not_of("0123456789abcdef-") != std::string::npos) {
+    throw std::runtime_error("cannot read a canonical Linux boot_id");
+  }
+  return value;
 }
 
 std::string Base64(const std::vector<std::uint8_t> &bytes) {
@@ -201,18 +222,29 @@ std::string MetadataJson(
 std::string MetadataHeaderJson(
     const Options &options,
     std::int64_t capture_start_steady_ns,
-    std::int64_t capture_start_system_ns) {
+    std::int64_t capture_start_system_ns,
+    const std::string &boot_id) {
   std::ostringstream stream;
   stream << std::fixed << std::setprecision(6)
          << "{\"capture_start_steady_ns\":" << capture_start_steady_ns
          << ",\"capture_start_system_ns\":" << capture_start_system_ns
+         << ",\"host_boot_id\":\"" << boot_id << "\""
          << ",\"collector\":\"rclcpp_native\""
          << ",\"publisher_created\":false"
          << ",\"qos_reliability\":\"" << options.reliability << "\""
          << ",\"record_type\":\"capture_start\""
          << ",\"requested_duration_s\":" << options.duration_seconds
          << ",\"schema_version\":1"
-         << ",\"source_topic\":\"/audiosender\"}\n";
+         << ",\"source_topic\":\"/audiosender\""
+         << ",\"speaker_or_audiohub_expected\":"
+         << (options.supervised_speaker_capture_token.empty() ? "false" : "true")
+         << ",\"supervised_speaker_capture_token\":";
+  if (options.supervised_speaker_capture_token.empty()) {
+    stream << "null";
+  } else {
+    stream << "\"" << options.supervised_speaker_capture_token << "\"";
+  }
+  stream << "}\n";
   return stream.str();
 }
 
@@ -220,7 +252,8 @@ std::string MetadataTrailerJson(
     std::size_t frame_count,
     std::int64_t capture_start_steady_ns,
     std::int64_t capture_end_steady_ns,
-    std::int64_t capture_end_system_ns) {
+    std::int64_t capture_end_system_ns,
+    bool speaker_or_audiohub_expected) {
   std::ostringstream stream;
   stream << std::fixed << std::setprecision(9)
          << "{\"capture_end_steady_ns\":" << capture_end_steady_ns
@@ -230,7 +263,8 @@ std::string MetadataTrailerJson(
                 1'000'000'000.0
          << ",\"frame_count\":" << frame_count
          << ",\"record_type\":\"capture_end\""
-         << ",\"speaker_or_audiohub_called\":false}\n";
+         << ",\"speaker_or_audiohub_called\":"
+         << (speaker_or_audiohub_expected ? "true" : "false") << "}\n";
   return stream.str();
 }
 
@@ -257,8 +291,9 @@ int main(int argc, char **argv) {
     std::size_t frame_count = 0U;
     const std::int64_t capture_start_steady_ns = SteadyNowNanoseconds();
     const std::int64_t capture_start_system_ns = SystemNowNanoseconds();
+    const std::string host_boot_id = ReadBootId();
     metadata_output.Write(MetadataHeaderJson(
-        options, capture_start_steady_ns, capture_start_system_ns));
+        options, capture_start_steady_ns, capture_start_system_ns, host_boot_id));
     const auto subscription = node->create_subscription<unitree_go::msg::AudioData>(
         "/audiosender", qos,
         [&](const unitree_go::msg::AudioData::ConstSharedPtr message,
@@ -284,7 +319,8 @@ int main(int argc, char **argv) {
     const std::int64_t capture_end_system_ns = SystemNowNanoseconds();
     metadata_output.Write(MetadataTrailerJson(
         frame_count, capture_start_steady_ns, capture_end_steady_ns,
-        capture_end_system_ns));
+        capture_end_system_ns,
+        !options.supervised_speaker_capture_token.empty()));
     frames_output.Flush();
     metadata_output.Flush();
     rclcpp::shutdown();
@@ -295,7 +331,9 @@ int main(int argc, char **argv) {
     metadata_output.Commit();
     std::cout << "{\"collector\":\"rclcpp_native\",\"frame_count\":"
               << frame_count << ",\"publisher_created\":false,"
-              << "\"speaker_or_audiohub_called\":false}\n";
+              << "\"speaker_or_audiohub_called\":"
+              << (options.supervised_speaker_capture_token.empty() ? "false" : "true")
+              << "}\n";
     return EXIT_SUCCESS;
   } catch (const std::exception &error) {
     if (rclcpp::ok()) {
