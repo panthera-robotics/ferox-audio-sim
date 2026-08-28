@@ -35,7 +35,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libopus0 shellcheck
-          python -m pip install --disable-pip-version-check "pytest==8.3.5"
+          python -m pip install --disable-pip-version-check \
+            "pytest==8.3.5" \
+            "numpy==1.26.4" \
+            "scipy==1.14.1"
 
       - name: Compile and reject malformed diffs
         run: |
