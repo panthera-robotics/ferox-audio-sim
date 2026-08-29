@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import statistics
 from collections.abc import Mapping
 from pathlib import Path
@@ -25,8 +26,9 @@ POLICY_ID = "ferox-go2-audio-native-timing-v1"
 _FRAME_KEYS = {"payload_b64", "receive_steady_s", "time_frame"}
 _HEADER_KEYS = {
     "capture_start_steady_ns", "capture_start_system_ns", "collector",
-    "publisher_created", "qos_reliability", "record_type",
+    "host_boot_id", "publisher_created", "qos_reliability", "record_type",
     "requested_duration_s", "schema_version", "source_topic",
+    "speaker_or_audiohub_expected", "supervised_speaker_capture_token",
 }
 _METADATA_FRAME_KEYS = {
     "callback_steady_ns", "callback_system_ns", "from_intra_process",
@@ -37,6 +39,7 @@ _TRAILER_KEYS = {
     "capture_end_steady_ns", "capture_end_system_ns", "elapsed_s",
     "frame_count", "record_type", "speaker_or_audiohub_called",
 }
+_BOOT_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 
 class NativeTimingCertificateError(ValueError):
@@ -195,7 +198,14 @@ def certify_native_timing(
         header.get("requested_duration_s"), label="requested_duration_s")
     if not 5.0 <= requested_duration_s <= 120.0:
         raise NativeTimingCertificateError("requested duration is outside [5, 120]")
-    if trailer.get("speaker_or_audiohub_called") is not False:
+    boot_id = header.get("host_boot_id")
+    if not isinstance(boot_id, str) or _BOOT_ID.fullmatch(boot_id) is None:
+        raise NativeTimingCertificateError("native host boot ID is invalid")
+    if (
+        header.get("speaker_or_audiohub_expected") is not False
+        or header.get("supervised_speaker_capture_token") is not None
+        or trailer.get("speaker_or_audiohub_called") is not False
+    ):
         raise NativeTimingCertificateError("native collector safety boundary is invalid")
     if _integer(trailer.get("frame_count"), label="frame_count") != len(frames):
         raise NativeTimingCertificateError("native trailer frame count mismatch")

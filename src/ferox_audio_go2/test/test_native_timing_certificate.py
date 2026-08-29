@@ -23,12 +23,15 @@ def write_native_bundle(tmp_path, *, count=10, reliability="reliable"):
         "capture_start_steady_ns": steady_start,
         "capture_start_system_ns": system_start,
         "collector": "rclcpp_native",
+        "host_boot_id": "01234567-89ab-cdef-0123-456789abcdef",
         "publisher_created": False,
         "qos_reliability": reliability,
         "record_type": "capture_start",
         "requested_duration_s": 5.0,
         "schema_version": 1,
         "source_topic": "/audiosender",
+        "speaker_or_audiohub_expected": False,
+        "supervised_speaker_capture_token": None,
     }, separators=(",", ":"), sort_keys=True)]
     for index in range(count):
         callback_steady = steady_start + 100_000_000 + index * 20_000_000
@@ -119,6 +122,27 @@ def test_native_certificate_rejects_unsafe_or_invalid_schema_inputs(tmp_path):
     lines[0] = json.dumps(document)
     frames_path.write_text("\n".join(lines) + "\n")
     with pytest.raises(NativeTimingCertificateError, match="invalid schema"):
+        load_certificate(frames_path, metadata_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("host_boot_id", "not-a-boot-id", "boot ID"),
+        ("speaker_or_audiohub_expected", True, "safety boundary"),
+        ("supervised_speaker_capture_token", "unexpected", "safety boundary"),
+    ],
+)
+def test_native_certificate_rejects_non_readonly_capture_header(
+    tmp_path, field, value, message,
+):
+    frames_path, metadata_path = write_native_bundle(tmp_path)
+    lines = metadata_path.read_text().splitlines()
+    header = json.loads(lines[0])
+    header[field] = value
+    lines[0] = json.dumps(header, separators=(",", ":"), sort_keys=True)
+    metadata_path.write_text("\n".join(lines) + "\n")
+    with pytest.raises(NativeTimingCertificateError, match=message):
         load_certificate(frames_path, metadata_path)
 
 

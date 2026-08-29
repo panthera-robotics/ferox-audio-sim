@@ -157,6 +157,66 @@ def test_docker_inspect_native_single_element_array_is_accepted(tmp_path):
         _json_document(path)
 
 
+@pytest.mark.parametrize(
+    "security_option",
+    ["no-new-privileges", "no-new-privileges:true", "no-new-privileges=true"],
+)
+def test_docker_no_new_privileges_inspect_forms_are_accepted(
+    tmp_path, security_option,
+):
+    reliable_path = tmp_path / "reliable.jsonl"
+    best_effort_path = tmp_path / "best-effort.jsonl"
+    write_capture(reliable_path, [20.0] * 120)
+    write_capture(best_effort_path, [20.0] * 120)
+    reliable_rows, reliable_binding = _load_capture(reliable_path)
+    best_effort_rows, best_effort_binding = _load_capture(best_effort_path)
+    reliable_inspect = inspect("a", "reliable")
+    best_effort_inspect = inspect("b", "best-effort")
+    reliable_inspect["HostConfig"]["SecurityOpt"] = [security_option]
+    best_effort_inspect["HostConfig"]["SecurityOpt"] = [security_option]
+    report = evaluate_strict_timing(
+        reliable_rows=reliable_rows,
+        best_effort_rows=best_effort_rows,
+        reliable_capture=reliable_binding,
+        best_effort_capture=best_effort_binding,
+        reliable_observation=observation(reliable_path, "reliable"),
+        best_effort_observation=observation(best_effort_path, "best_effort"),
+        reliable_container=reliable_inspect,
+        best_effort_container=best_effort_inspect,
+    )
+    assert report["checks"]["both_collectors_read_only_and_unprivileged"] is True
+
+
+@pytest.mark.parametrize(
+    "security_option",
+    ["no-new-privileges:false", "no-new-privileges=false", "no-new-privileges-extra"],
+)
+def test_disabled_or_lookalike_no_new_privileges_is_rejected(
+    tmp_path, security_option,
+):
+    reliable_path = tmp_path / "reliable.jsonl"
+    best_effort_path = tmp_path / "best-effort.jsonl"
+    write_capture(reliable_path, [20.0] * 120)
+    write_capture(best_effort_path, [20.0] * 120)
+    reliable_rows, reliable_binding = _load_capture(reliable_path)
+    best_effort_rows, best_effort_binding = _load_capture(best_effort_path)
+    reliable_inspect = inspect("a", "reliable")
+    best_effort_inspect = inspect("b", "best-effort")
+    reliable_inspect["HostConfig"]["SecurityOpt"] = [security_option]
+    best_effort_inspect["HostConfig"]["SecurityOpt"] = [security_option]
+    report = evaluate_strict_timing(
+        reliable_rows=reliable_rows,
+        best_effort_rows=best_effort_rows,
+        reliable_capture=reliable_binding,
+        best_effort_capture=best_effort_binding,
+        reliable_observation=observation(reliable_path, "reliable"),
+        best_effort_observation=observation(best_effort_path, "best_effort"),
+        reliable_container=reliable_inspect,
+        best_effort_container=best_effort_inspect,
+    )
+    assert report["checks"]["both_collectors_read_only_and_unprivileged"] is False
+
+
 def test_native_rclcpp_collector_is_accepted_by_strict_identity(tmp_path):
     intervals = [20.0] * 120
     reliable_path = tmp_path / "reliable.jsonl"

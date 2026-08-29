@@ -234,8 +234,14 @@ def _container_identity(
         ),
         "no_new_privileges": (
             isinstance(security_options, list)
-            and any(str(value).startswith("no-new-privileges:true")
-                    for value in security_options)
+            and any(
+                str(value).strip().lower() in {
+                    "no-new-privileges",
+                    "no-new-privileges:true",
+                    "no-new-privileges=true",
+                }
+                for value in security_options
+            )
         ),
         "clean_exit": (
             state.get("ExitCode") == 0 and state.get("OOMKilled") is False
