@@ -80,7 +80,7 @@ common=(
 )
 
 probe_command=(
-  /bin/bash -lc
+  /bin/bash --noprofile --norc -c
   'source /opt/ros/humble/setup.bash; source /opt/ferox_msgs_ws/install/setup.bash; source /unitree_ws/install/setup.bash; source /workspace/install/setup.bash; exec /workspace/install/lib/ferox_audio_go2_native/go2_audio_native_timing_probe "$@"'
   ferox-native-probe
 )
