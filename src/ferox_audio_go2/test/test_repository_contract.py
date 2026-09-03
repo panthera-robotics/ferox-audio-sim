@@ -106,6 +106,12 @@ def test_discovery_is_read_only_and_does_not_name_a_codec():
     assert "Do **not** claim TCLw" in runbook
 
 
+def test_native_timing_runner_does_not_load_an_untrusted_user_profile():
+    runner = (ROOT / "scripts/run_live_native_timing_ab.sh").read_text()
+    assert "/bin/bash --noprofile --norc -c" in runner
+    assert "/bin/bash -lc" not in runner
+
+
 def test_speaker_probe_is_bounded_one_shot_and_needs_human_confirmation():
     source = (ROOT / (
         "src/ferox_audio_go2/ferox_audio_go2/speaker_probe.py")).read_text()
