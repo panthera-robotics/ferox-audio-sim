@@ -11,8 +11,8 @@
       subscribes /ferox/&lt;robot_id&gt;/audio/speaker_out  (AudioChunk)
 
     ferox-speech consumes these topics and stays audio-device-agnostic.
-    The same contract is implemented by ferox_audio_go2 / ferox_audio_g1
-    against real robot hardware — those live in the driver repos.
+    The same contract is implemented by this repo's ferox_audio_go2 and
+    ferox_audio_g1 packages against real robot hardware.
   </description>
   <maintainer email="mohammed@pantherarobots.com">Mohammed Magdy</maintainer>
   <license>Proprietary</license>

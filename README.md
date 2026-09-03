@@ -10,11 +10,13 @@ microphone and plays to its speaker, bridging both directions to ROS 2
 topics so `ferox-speech` (running on Vast.ai / a Tailscale DGX) can do
 speech I/O over DDS as if the laptop were a robot.
 
-Two packages:
+Core packages:
 
-- **`ferox_audio_msgs`** — the `AudioChunk` message, on its own so any
-  repo can depend on just the interface.
+- **`ferox_msgs`** — the shared `AudioChunk` interface, consumed as an
+  external, dependency-light ROS package.
 - **`ferox_audio_sim`** — the `audio_bridge` node that does the I/O.
+- **`ferox_audio_g1`** — the G1 voice adapter.
+- **`ferox_audio_go2`** — the evidence-gated Go2 hardware adapter.
 
 ## The topic contract
 
@@ -23,8 +25,8 @@ Every audio backend — `ferox_audio_sim` today, `ferox_audio_go2` /
 
 | Topic                                 | Dir        | Type                              | QoS                   |
 |----------------------------------------|------------|-----------------------------------|-----------------------|
-| `/ferox/<robot_id>/audio/mic_raw`      | published  | `ferox_audio_msgs/msg/AudioChunk` | BEST_EFFORT, depth 10 |
-| `/ferox/<robot_id>/audio/speaker_out`  | subscribed | `ferox_audio_msgs/msg/AudioChunk` | BEST_EFFORT, depth 10 |
+| `/ferox/<robot_id>/audio/mic_raw`      | published  | `ferox_msgs/msg/AudioChunk` | BEST_EFFORT, depth 5 |
+| `/ferox/<robot_id>/audio/speaker_out`  | subscribed | `ferox_msgs/msg/AudioChunk` | BEST_EFFORT, depth 5 |
 
 - The driver **publishes** mic frames on `audio/mic_raw`.
 - The driver **subscribes** `audio/speaker_out` and plays the frames.
@@ -135,7 +137,7 @@ docker exec ferox_audio_sim bash -c \
 docker exec ferox_audio_sim bash -c 'python3 -c "
 import rclpy
 from rclpy.node import Node
-from ferox_audio_msgs.msg import AudioChunk
+from ferox_msgs.msg import AudioChunk
 rclpy.init()
 n = Node(\"echo\")
 p = n.create_publisher(AudioChunk, \"/ferox/go2_01/audio/speaker_out\", 10)
@@ -182,7 +184,7 @@ publishing and subscribing:
 
 ```python
 from rclpy.qos import qos_profile_sensor_data
-from ferox_audio_msgs.msg import AudioChunk
+from ferox_msgs.msg import AudioChunk
 
 # Subscribing to mic_raw
 self.create_subscription(
@@ -204,17 +206,76 @@ This is the canonical QoS for streaming sensor data in ROS 2 —
 BEST_EFFORT, KEEP_LAST, depth 5. It matches the audio_bridge node's
 configuration exactly.
 
-Build dependency: add `<depend>ferox_audio_msgs</depend>` to your
-consumer's package.xml. `ferox_audio_msgs` is a tiny, dependency-light
-rosidl package precisely so it can be vendored into a consumer's colcon
-workspace without dragging in the bridge node or Ferox.
+Build dependency: add `<depend>ferox_msgs</depend>` to your consumer's
+`package.xml`. Keep the shared `ferox_msgs` interface package available in the
+consumer's colcon workspace without coupling it to a hardware bridge.
 
 ## Real-hardware counterparts
 
-`ferox_audio_go2` and `ferox_audio_g1` will implement this exact topic
-contract against the Go2 / G1 on-robot audio devices. They will live in
-the respective driver repos and ship when hardware arrives. `ferox-speech`
-will not change between sim and hardware — only the audio backend swaps.
+`ferox_audio_go2` and `ferox_audio_g1` implement this exact topic contract in
+this repository. Their hardware paths remain disabled until their respective
+runtime and evidence gates pass. `ferox-speech` does not change between sim
+and hardware — only the audio backend swaps.
+
+## Go2 hardware adapter (evidence-gated)
+
+This repository now includes `ferox_audio_go2`. It deliberately does **not**
+pretend that G1's `AudioClient.PlayStream` API exists on Go2. The official
+Unitree SDK exposes a Go2 `AudioData` IDL but no Go2 `AudioClient`; independent
+hardware captures also disagree about whether 160-byte `/audiosender` frames
+are 8 kHz G.711 u-law or 48 kHz Opus. The adapter therefore requires a named
+profile plus a recent, SHA-256-pinned, operator-confirmed evidence manifest.
+
+Supported profile contracts:
+
+| Profile | Microphone | Speaker |
+|---|---|---|
+| `go2_opus48_audiohub_v1` | Opus, 48 kHz mono, 960 samples / 160 bytes / 20 ms | observed `audiohub` 4001 + 4003 WAV upload, 22050 Hz S16_LE mono |
+| `go2_ulaw8_mic_only` | G.711 u-law, 8 kHz mono, 160 samples / 160 bytes / 20 ms | disabled; no matching speaker evidence |
+
+Both profiles publish the same versioned 16 kHz mono PCM contract on
+`/ferox/<robot_id>/audio/mic_raw`. The speaker path accepts complete,
+continuous 22050 Hz `AudioChunk` utterances and only uploads after `FLAG_END`;
+timeouts, response errors, sequence gaps, and buffer overflow latch output
+fail-closed until process restart.
+
+First run the read-only discovery on robot domain 0:
+
+```bash
+export ROBOT_ID=go2_02 FEROX_DDS_INTERFACE=eth0
+scripts/go2_audio_discover.sh \
+  /absolute/new/go2-02-audio-observation.json \
+  /absolute/new/go2-02-audio-frames.jsonl
+```
+
+The discovery tool only subscribes to `/audiosender`. It records frame shape,
+cadence, monotonicity, and a digest, and explicitly reports
+`"interpretation": "none"`; it does not guess a codec. Decode a controlled
+recording with both candidates, listen to the result, run the one-shot bounded
+`go2_audio_speaker_probe` under direct supervision if applicable, and fill
+`src/ferox_audio_go2/evidence/go2_audio_evidence.template.json`. Review the
+manifest, note its SHA-256, then provide these deployment inputs:
+
+```bash
+export FEROX_AUDIO_GO2_IMAGE='registry/ferox-audio-go2@sha256:<digest>'
+export GO2_AUDIO_EVIDENCE_PATH=/absolute/reviewed/go2-02-audio-evidence.json
+export GO2_AUDIO_EVIDENCE_SHA256='<sha256 of the exact manifest>'
+export GO2_AUDIO_RUNTIME_FIRMWARE='<firmware fingerprint copied from Unitree App>'
+export GO2_AUDIO_PROFILE=go2_opus48_audiohub_v1
+export GO2_AUDIO_MIC_ENABLED=true
+export GO2_AUDIO_SPEAKER_ENABLED=false   # enable only after speaker probe evidence
+export FEROX_DDS_INTERFACE=eth0
+docker compose -f docker/docker-compose.go2.yml up -d
+```
+
+Builds also require an immutable shared-message image reference, for example
+`--build-arg FEROX_MSGS_IMAGE=registry/ferox-msgs@sha256:<digest>`; a mutable
+tag is intentionally not the Go2 Dockerfile default.
+
+The container runs the hardware bridge on domain 0 and a narrow gateway to
+application domain 42. Only mic and validated diagnostics cross 0→42; only the
+versioned speaker `AudioChunk` crosses 42→0. No motion/control topic or generic
+DDS bridge is present.
 
 ## Observed round-trip latency
 

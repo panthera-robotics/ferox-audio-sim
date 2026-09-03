@@ -1,0 +1,138 @@
+name: Audio offline gates
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - "kevin/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audio-offline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pure-python-contracts:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install bounded test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopus0 shellcheck
+          python -m pip install --disable-pip-version-check \
+            "pytest==8.3.5" \
+            "numpy==1.26.4" \
+            "scipy==1.14.1"
+
+      - name: Compile and reject malformed diffs
+        run: |
+          python -m compileall -q \
+            src/ferox_audio_sim/ferox_audio_sim \
+            src/ferox_audio_g1/ferox_audio_g1 \
+            src/ferox_audio_go2/ferox_audio_go2
+          git diff --check "$(git merge-base origin/main HEAD)" HEAD
+
+      - name: Run all backend contracts together
+        run: python -m pytest -q
+
+      - name: Check shell syntax
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(find docker scripts -type f -name '*.sh' -print0)
+          shellcheck --exclude=SC1091 docker/*.sh scripts/*.sh
+
+  native-linux-contracts:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Build and exercise pinned native timing and AEC3 contracts
+        run: |
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/repo:ro" \
+            ros:humble-ros-base@sha256:7bea3d9aa2483d3ca34c8e30d921b79273b0913bd7dc64bebf51d082b5d107e4 \
+            /bin/bash -lc '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential ca-certificates curl git ninja-build pkg-config \
+                python3-colcon-common-extensions python3-pip \
+                ros-humble-rosidl-default-generators \
+                ros-humble-rosidl-generator-dds-idl
+              rm -rf /var/lib/apt/lists/*
+
+              curl --fail --location --proto "=https" --tlsv1.2 \
+                https://files.pythonhosted.org/packages/55/a6/47b9353c331318a13eb050887eacfd61eb075746285f9baf7ef7de6ae235/meson-1.5.2-py3-none-any.whl \
+                --output /tmp/meson-1.5.2-py3-none-any.whl
+              echo "77706e2368a00d789c097632ccf4fc39251fba56d03e1e1b262559a3c7a08f5b  /tmp/meson-1.5.2-py3-none-any.whl" \
+                | sha256sum --check --strict
+              python3 -m pip install --no-cache-dir --no-deps \
+                /tmp/meson-1.5.2-py3-none-any.whl
+              curl --fail --location --proto "=https" --tlsv1.2 \
+                https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/webrtc-audio-processing-2.1.tar.xz \
+                --output /tmp/webrtc-audio-processing.tar.xz
+              echo "ae9302824b2038d394f10213cab05312c564a038434269f11dbf68f511f9f9fe  /tmp/webrtc-audio-processing.tar.xz" \
+                | sha256sum --check --strict
+              mkdir -p /tmp/webrtc-source
+              tar --extract --xz --file /tmp/webrtc-audio-processing.tar.xz \
+                --directory /tmp/webrtc-source --strip-components=1
+              meson setup /tmp/webrtc-build /tmp/webrtc-source \
+                --prefix=/opt/webrtc-audio-processing-2.1 --libdir=lib \
+                --buildtype=release --wrap-mode=forcefallback
+              meson compile -C /tmp/webrtc-build
+              meson install -C /tmp/webrtc-build
+              export PKG_CONFIG_PATH=/opt/webrtc-audio-processing-2.1/lib/pkgconfig
+              export LD_LIBRARY_PATH=/opt/webrtc-audio-processing-2.1/lib
+              test "$(pkg-config --modversion webrtc-audio-processing-2)" = 2.1
+
+              mkdir -p /native_ws/src
+              git init /native_ws/src/unitree_ros2
+              git -C /native_ws/src/unitree_ros2 remote add origin \
+                https://github.com/unitreerobotics/unitree_ros2.git
+              git -c http.version=HTTP/1.1 -C /native_ws/src/unitree_ros2 fetch \
+                --depth 1 --no-tags origin 668d1ec5a05d1c38d3306bdca7d59f2ba3581a88
+              git -C /native_ws/src/unitree_ros2 checkout --detach \
+                668d1ec5a05d1c38d3306bdca7d59f2ba3581a88
+              cp -a /repo/src/ferox_audio_go2_native /native_ws/src/
+              set +u
+              source /opt/ros/humble/setup.bash
+              set -u
+              cd /native_ws
+              colcon build --merge-install \
+                --packages-select unitree_go unitree_api ferox_audio_go2_native \
+                --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+              set +u
+              source /native_ws/install/setup.bash
+              set -u
+              ldd /native_ws/install/lib/ferox_audio_go2_native/go2_audio_aec3_offline \
+                | tee /tmp/ldd.txt
+              ! grep -F "not found" /tmp/ldd.txt
+              python3 /repo/src/ferox_audio_go2/test/run_native_failure_boundary.py \
+                --aec3-runtime /native_ws/install/lib/ferox_audio_go2_native/go2_audio_aec3_offline \
+                --timing-runtime /native_ws/install/lib/ferox_audio_go2_native/go2_audio_native_timing_probe
+              PYTHONPATH=/repo/src/ferox_audio_go2 \
+                python3 /repo/src/ferox_audio_go2/test/run_native_aec3_delay_sweep.py \
+                  --runtime /native_ws/install/lib/ferox_audio_go2_native/go2_audio_aec3_offline \
+                  --duration-s 12 --skip-s 4 --output /tmp/aec3-delay-sweep.json \
+                  >/dev/null
+              python3 -m json.tool /tmp/aec3-delay-sweep.json >/dev/null
+            '

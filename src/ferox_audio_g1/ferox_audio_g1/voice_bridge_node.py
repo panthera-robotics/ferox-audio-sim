@@ -11,7 +11,15 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from unitree_api.msg import Request, Response
 
-from .pcm_gate import PcmContract, PcmContractError, PcmGate
+from .pcm_gate import (
+    FLAG_DISCONTINUITY,
+    FLAG_END,
+    FLAG_START,
+    PcmContract,
+    PcmContractError,
+    PcmGate,
+)
+from .pcm_resample import LinearPcmResampler, PcmResampleError
 from .playback_telemetry import PlaybackTelemetry
 from .health import voice_health_report
 from .unitree_voice_contract import (
@@ -52,6 +60,12 @@ class G1VoiceBridge(Node):
                 float(self.get_parameter("max_interarrival_ms").value) / 1000.0),
             idle_flush_s=float(self.get_parameter("idle_flush_ms").value) / 1000.0,
         ))
+        self._source_gate = PcmGate(PcmContract(sample_rate=22_050))
+        self._resampler = LinearPcmResampler(22_050, 16_000)
+        self._input_rate: int | None = None
+        self._normalized_sequence = 0
+        self._normalized_sample_offset = 0
+        self._normalized_start_flags = 0
         self._playback_telemetry = PlaybackTelemetry()
         self._unitree_stream_id = f"{self._app_name}-{time.clock_gettime_ns(time.CLOCK_BOOTTIME)}"
         self._identity_counter = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
@@ -115,26 +129,102 @@ class G1VoiceBridge(Node):
     def _on_audio(self, message: AudioChunk) -> None:
         now_steady = time.monotonic()
         try:
-            self._gate.accept(
-                data=bytes(message.data),
-                sample_rate=int(message.sample_rate),
-                channels=int(message.channels),
-                sample_width=int(message.sample_width),
-                contract_version=int(message.contract_version),
-                encoding=int(message.encoding),
-                stream_id=str(message.stream_id),
-                sequence=int(message.sequence),
-                sample_offset=int(message.sample_offset),
-                flags=int(message.flags),
-                receive_steady_s=now_steady,
-            )
-        except PcmContractError as exc:
+            input_rate = int(message.sample_rate)
+            flags = int(message.flags)
+            if self._input_rate is None:
+                if not flags & FLAG_START:
+                    raise PcmContractError(
+                        "first speaker chunk must carry FLAG_START")
+                self._input_rate = input_rate
+            elif input_rate != self._input_rate:
+                raise PcmContractError("speaker sample rate changed mid-stream")
+
+            if input_rate == 16_000:
+                self._gate.accept(
+                    data=bytes(message.data),
+                    sample_rate=input_rate,
+                    channels=int(message.channels),
+                    sample_width=int(message.sample_width),
+                    contract_version=int(message.contract_version),
+                    encoding=int(message.encoding),
+                    stream_id=str(message.stream_id),
+                    sequence=int(message.sequence),
+                    sample_offset=int(message.sample_offset),
+                    flags=flags,
+                    receive_steady_s=now_steady,
+                )
+                if flags & FLAG_END:
+                    self._input_rate = None
+            elif input_rate == 22_050:
+                self._source_gate.accept(
+                    data=bytes(message.data),
+                    sample_rate=input_rate,
+                    channels=int(message.channels),
+                    sample_width=int(message.sample_width),
+                    contract_version=int(message.contract_version),
+                    encoding=int(message.encoding),
+                    stream_id=str(message.stream_id),
+                    sequence=int(message.sequence),
+                    sample_offset=int(message.sample_offset),
+                    flags=flags,
+                    receive_steady_s=now_steady,
+                )
+                if flags & FLAG_START:
+                    self._resampler.reset()
+                    self._normalized_sequence = 0
+                    self._normalized_sample_offset = 0
+                    self._normalized_start_flags = flags & FLAG_DISCONTINUITY
+                normalized = self._resampler.feed(
+                    bytes(message.data), end=bool(flags & FLAG_END))
+                self._source_gate.discard_buffer()
+                if not normalized:
+                    if flags & FLAG_END:
+                        raise PcmContractError(
+                            "22050 Hz stream ended without normalized PCM")
+                    self._accepted_chunks += 1
+                    return
+                normalized_flags = flags & FLAG_END
+                if self._normalized_sequence == 0:
+                    normalized_flags |= FLAG_START
+                    normalized_flags |= self._normalized_start_flags
+                self._gate.accept(
+                    data=normalized,
+                    sample_rate=16_000,
+                    channels=1,
+                    sample_width=2,
+                    contract_version=int(message.contract_version),
+                    encoding=int(message.encoding),
+                    stream_id=str(message.stream_id),
+                    sequence=self._normalized_sequence,
+                    sample_offset=self._normalized_sample_offset,
+                    flags=normalized_flags,
+                    receive_steady_s=now_steady,
+                )
+                self._normalized_sequence += 1
+                self._normalized_sample_offset += len(normalized) // 2
+                self._normalized_start_flags = 0
+                if flags & FLAG_END:
+                    self._input_rate = None
+            else:
+                raise PcmContractError(
+                    f"unsupported speaker sample rate {input_rate}; expected 16000 or 22050")
+        except (PcmContractError, PcmResampleError) as exc:
+            self._clear_audio_state()
             self._rejected_chunks += 1
             self.get_logger().error(f"speaker chunk rejected: {exc}")
             return
         self._accepted_chunks += 1
         if not self._speaker_enabled:
             self._gate.discard_buffer()
+
+    def _clear_audio_state(self) -> None:
+        self._gate.clear()
+        self._source_gate.clear()
+        self._resampler.reset()
+        self._input_rate = None
+        self._normalized_sequence = 0
+        self._normalized_sample_offset = 0
+        self._normalized_start_flags = 0
 
     def _tick(self) -> None:
         now = time.monotonic()
@@ -242,14 +332,14 @@ class G1VoiceBridge(Node):
     def _latch_fault(self, reason: str) -> None:
         if self._latched_fault is None:
             self._latched_fault = reason
-            self._gate.clear()
+            self._clear_audio_state()
             self.get_logger().fatal(f"G1 voice bridge latched fail-closed: {reason}")
         self._inflight_id = None
         self._inflight_kind = None
         self._inflight_since_s = None
 
     def shutdown(self) -> None:
-        self._gate.clear()
+        self._clear_audio_state()
         if self._speaker_enabled and self._play_requests_ok:
             # Never block shutdown on the optional stop acknowledgement.
             try:

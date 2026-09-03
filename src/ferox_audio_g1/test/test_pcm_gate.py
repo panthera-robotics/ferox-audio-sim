@@ -128,6 +128,37 @@ def test_end_flag_flushes_partial_tail_immediately():
     assert gate.buffered_bytes == 0
 
 
+def test_canonical_22050_source_contract_is_valid_but_default_g1_gate_stays_16khz():
+    source_gate = PcmGate(PcmContract(sample_rate=22_050))
+    source_gate.accept(
+        data=bytes(4_410),
+        sample_rate=22_050,
+        channels=1,
+        sample_width=2,
+        contract_version=CONTRACT_VERSION,
+        encoding=ENCODING_PCM_S16LE,
+        stream_id="speaker-22050",
+        sequence=0,
+        sample_offset=0,
+        flags=FLAG_START | FLAG_END,
+        receive_steady_s=10.0,
+    )
+    with pytest.raises(PcmContractError, match="expected 16000 Hz"):
+        PcmGate().accept(
+            data=bytes(4_410),
+            sample_rate=22_050,
+            channels=1,
+            sample_width=2,
+            contract_version=CONTRACT_VERSION,
+            encoding=ENCODING_PCM_S16LE,
+            stream_id="speaker-22050",
+            sequence=0,
+            sample_offset=0,
+            flags=FLAG_START,
+            receive_steady_s=10.0,
+        )
+
+
 def test_flushes_open_stream_tail_only_after_idle_deadline():
     gate = PcmGate()
     accept(gate, now=10.0)

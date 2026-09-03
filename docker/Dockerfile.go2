@@ -1,0 +1,142 @@
+ARG ROS_BASE_IMAGE=ros:humble-ros-base@sha256:7bea3d9aa2483d3ca34c8e30d921b79273b0913bd7dc64bebf51d082b5d107e4
+ARG FEROX_MSGS_IMAGE=ferox/msgs@sha256:0000000000000000000000000000000000000000000000000000000000000000
+ARG SOURCE_REVISION=uncommitted
+FROM ${FEROX_MSGS_IMAGE} AS ferox_msgs_artifact
+
+FROM ${ROS_BASE_IMAGE} AS webrtc_apm_builder
+ARG WEBRTC_APM_VERSION=2.1
+ARG WEBRTC_APM_SHA256=ae9302824b2038d394f10213cab05312c564a038434269f11dbf68f511f9f9fe
+ARG MESON_VERSION=1.5.2
+ARG MESON_WHEEL_SHA256=77706e2368a00d789c097632ccf4fc39251fba56d03e1e1b262559a3c7a08f5b
+SHELL ["/bin/bash", "-lc"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl ninja-build pkg-config python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      "https://files.pythonhosted.org/packages/55/a6/47b9353c331318a13eb050887eacfd61eb075746285f9baf7ef7de6ae235/meson-${MESON_VERSION}-py3-none-any.whl" \
+      --output "/tmp/meson-${MESON_VERSION}-py3-none-any.whl" \
+    && echo "${MESON_WHEEL_SHA256}  /tmp/meson-${MESON_VERSION}-py3-none-any.whl" \
+      | sha256sum --check --strict \
+    && python3 -m pip install --no-cache-dir --no-deps \
+      "/tmp/meson-${MESON_VERSION}-py3-none-any.whl" \
+    && curl --fail --location --proto '=https' --tlsv1.2 \
+      "https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/webrtc-audio-processing-${WEBRTC_APM_VERSION}.tar.xz" \
+      --output /tmp/webrtc-audio-processing.tar.xz \
+    && echo "${WEBRTC_APM_SHA256}  /tmp/webrtc-audio-processing.tar.xz" \
+      | sha256sum --check --strict \
+    && mkdir -p /tmp/webrtc-audio-processing-source \
+    && tar --extract --xz --file /tmp/webrtc-audio-processing.tar.xz \
+      --directory /tmp/webrtc-audio-processing-source --strip-components=1 \
+    && meson setup /tmp/webrtc-audio-processing-build \
+      /tmp/webrtc-audio-processing-source \
+      --prefix=/opt/webrtc-audio-processing-${WEBRTC_APM_VERSION} \
+      --libdir=lib --buildtype=release --wrap-mode=forcefallback \
+      -Dneon=enabled \
+    && meson compile -C /tmp/webrtc-audio-processing-build \
+    && meson install -C /tmp/webrtc-audio-processing-build \
+    && test "$(PKG_CONFIG_PATH=/opt/webrtc-audio-processing-${WEBRTC_APM_VERSION}/lib/pkgconfig \
+      pkg-config --modversion webrtc-audio-processing-2)" = "${WEBRTC_APM_VERSION}"
+
+FROM ${ROS_BASE_IMAGE} AS go2_audio_ros_tested
+ARG ROS_DISTRO=humble
+ARG UNITREE_ROS2_REF=668d1ec5a05d1c38d3306bdca7d59f2ba3581a88
+SHELL ["/bin/bash", "-lc"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential git libopus0 python3-colcon-common-extensions python3-pytest \
+      python3-numpy python3-scipy \
+      ros-${ROS_DISTRO}-diagnostic-msgs \
+      ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+      ros-${ROS_DISTRO}-rosidl-default-generators \
+      ros-${ROS_DISTRO}-rosidl-generator-dds-idl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /unitree_ws/src \
+    && [[ "${UNITREE_ROS2_REF}" =~ ^[0-9a-f]{40}$ ]] \
+    && git init /unitree_ws/src/unitree_ros2 \
+    && git -C /unitree_ws/src/unitree_ros2 remote add origin \
+         https://github.com/unitreerobotics/unitree_ros2.git \
+    && git -c http.version=HTTP/1.1 -C /unitree_ws/src/unitree_ros2 fetch \
+         --depth 1 --no-tags origin "${UNITREE_ROS2_REF}" \
+    && git -C /unitree_ws/src/unitree_ros2 checkout --detach "${UNITREE_ROS2_REF}" \
+    && test "$(git -C /unitree_ws/src/unitree_ros2 rev-parse HEAD)" = "${UNITREE_ROS2_REF}" \
+    && source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && cd /unitree_ws \
+    && colcon build --merge-install --packages-select unitree_go unitree_api \
+         --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+COPY --from=webrtc_apm_builder /opt/webrtc-audio-processing-2.1 \
+  /opt/webrtc-audio-processing-2.1
+ENV PKG_CONFIG_PATH=/opt/webrtc-audio-processing-2.1/lib/pkgconfig
+ENV LD_LIBRARY_PATH=/opt/webrtc-audio-processing-2.1/lib
+
+WORKDIR /workspace
+COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
+COPY src/ferox_audio_go2 /workspace/src/ferox_audio_go2
+COPY src/ferox_audio_go2_native /workspace/src/ferox_audio_go2_native
+COPY docs/hats-1m-spoken-runbook.md /workspace/docs/hats-1m-spoken-runbook.md
+COPY docker/Dockerfile.go2 docker/entrypoint-g1-dds.sh \
+     docker/entrypoint-go2-bridge.sh \
+     docker/docker-compose.go2.yml /workspace/docker/
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && source /opt/ferox_msgs_ws/install/setup.bash \
+    && source /unitree_ws/install/setup.bash \
+    && test "$(pkg-config --modversion webrtc-audio-processing-2)" = "2.1" \
+    && colcon build --merge-install \
+         --packages-select ferox_audio_go2 ferox_audio_go2_native \
+         --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    && source /workspace/install/setup.bash \
+    && python3 -m pytest -q /workspace/src/ferox_audio_go2/test \
+    && python3 /workspace/src/ferox_audio_go2/test/ros_go2_audio_domain_gateway_smoke.py \
+    && python3 -c 'from ferox_msgs.msg import AudioChunk; from unitree_go.msg import AudioData; from unitree_api.msg import Request, Response' \
+    && install -D -m 0444 /dev/null /opt/ferox-validation/go2-audio-passed
+
+FROM go2_audio_ros_tested AS go2_audio_aec3_offline_tested
+ARG FEROX_MSGS_IMAGE
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.source="https://github.com/panthera-robotics/ferox-audio-sim" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      ai.panthera.ferox-msgs-image="${FEROX_MSGS_IMAGE}" \
+      ai.panthera.unitree-ros2-ref="668d1ec5a05d1c38d3306bdca7d59f2ba3581a88" \
+      ai.panthera.webrtc-audio-processing="2.1"
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && source /opt/ferox_msgs_ws/install/setup.bash \
+    && source /unitree_ws/install/setup.bash \
+    && source /workspace/install/setup.bash \
+    && python3 /workspace/src/ferox_audio_go2/test/run_native_aec3_smoke.py \
+         --runtime /workspace/install/lib/ferox_audio_go2_native/go2_audio_aec3_offline \
+         --certificate /workspace/install/lib/ferox_audio_go2/go2_audio_aec3_offline_certificate \
+    && python3 /workspace/src/ferox_audio_go2/test/run_native_failure_boundary.py \
+         --aec3-runtime /workspace/install/lib/ferox_audio_go2_native/go2_audio_aec3_offline \
+         --timing-runtime /workspace/install/lib/ferox_audio_go2_native/go2_audio_native_timing_probe \
+    && python3 /workspace/src/ferox_audio_go2/test/run_native_aec3_delay_sweep.py \
+         --runtime /workspace/install/lib/ferox_audio_go2_native/go2_audio_aec3_offline \
+         --duration-s 12 --skip-s 4 --output /tmp/aec3-delay-sweep.json \
+         >/dev/null \
+    && python3 -c 'import json; d=json.load(open("/tmp/aec3-delay-sweep.json")); assert len(d["results"]) == 13 and d["production_ready"] is False'
+
+COPY config/cyclonedds.xml.template /etc/cyclonedds.xml.template
+COPY docker/entrypoint-g1-dds.sh /usr/local/bin/entrypoint-go2-dds.sh
+COPY docker/entrypoint-go2-bridge.sh /entrypoint-go2.sh
+RUN chmod 0555 /usr/local/bin/entrypoint-go2-dds.sh /entrypoint-go2.sh \
+    && groupadd --gid 10001 panthera \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash panthera \
+    && printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -eo pipefail' \
+      'source /opt/ros/humble/setup.bash' \
+      'source /opt/ferox_msgs_ws/install/setup.bash' \
+      'source /unitree_ws/install/setup.bash' \
+      'source /workspace/install/setup.bash' \
+      'exec ros2 run ferox_audio_go2 go2_audio_domain_gateway "$@"' \
+      > /entrypoint-go2-gateway.sh \
+    && chmod 0555 /entrypoint-go2-gateway.sh
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV ROS_DOMAIN_ID=0
+ENV CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
+ENV ROS_LOG_DIR=/tmp/ros-logs
+ENV HOME=/home/panthera
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/entrypoint-go2-dds.sh"]
+CMD ["/entrypoint-go2.sh"]
