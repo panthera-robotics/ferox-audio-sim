@@ -112,6 +112,11 @@ def test_native_timing_runner_does_not_load_an_untrusted_user_profile():
     runner = (ROOT / "scripts/run_live_native_timing_ab.sh").read_text()
     assert "/bin/bash --noprofile --norc -c" in runner
     assert "/bin/bash -lc" not in runner
+    assert "FEROX_DDS_INTERFACE:?" in runner
+    assert "FEROX_DDS_IPV4_CIDR:?" in runner
+    assert '--env "FEROX_DDS_INTERFACE=${FEROX_DDS_INTERFACE}"' in runner
+    assert '--env "FEROX_DDS_IPV4_CIDR=${FEROX_DDS_IPV4_CIDR}"' in runner
+    assert "FEROX_DDS_INTERFACE=eth0" not in runner
 
 
 def test_speaker_probe_is_bounded_one_shot_and_needs_human_confirmation():
