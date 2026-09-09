@@ -143,6 +143,7 @@ def test_arm64_image_builds_exact_unitree_commit_and_runs_gates():
     assert "ENV ROS_LOG_DIR=/tmp/ros-logs" in dockerfile
     assert "USER 10001:10001" in dockerfile
     assert "iproute2" in dockerfile
+    assert "COPY scripts/run_live_native_timing_ab.sh" in dockerfile
     assert "exec ros2 run ferox_audio_go2 go2_audio_bridge" in bridge_entrypoint
     assert "unsupported Go2 audio bridge argument" in bridge_entrypoint
     assert "exec ros2 launch" not in bridge_entrypoint

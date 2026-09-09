@@ -75,6 +75,7 @@ COPY --from=ferox_msgs_artifact /opt/ferox_msgs_ws /opt/ferox_msgs_ws
 COPY src/ferox_audio_go2 /workspace/src/ferox_audio_go2
 COPY src/ferox_audio_go2_native /workspace/src/ferox_audio_go2_native
 COPY docs/hats-1m-spoken-runbook.md /workspace/docs/hats-1m-spoken-runbook.md
+COPY scripts/run_live_native_timing_ab.sh /workspace/scripts/run_live_native_timing_ab.sh
 COPY docker/Dockerfile.go2 docker/entrypoint-g1-dds.sh \
      docker/entrypoint-go2-bridge.sh \
      docker/docker-compose.go2.yml /workspace/docker/
