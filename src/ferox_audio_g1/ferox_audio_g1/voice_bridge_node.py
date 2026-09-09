@@ -36,6 +36,8 @@ class G1VoiceBridge(Node):
         super().__init__("g1_voice_bridge")
         self.declare_parameter("speaker_enabled", False)
         self.declare_parameter("query_volume_on_start", True)
+        self.declare_parameter("endpoint_discovery_timeout_s", 5.0)
+        self.declare_parameter("max_enabled_volume", 25)
         self.declare_parameter("app_name", "ferox_speech")
         self.declare_parameter("request_timeout_s", 2.0)
         self.declare_parameter("target_request_ms", 1000)
@@ -45,10 +47,21 @@ class G1VoiceBridge(Node):
 
         self._speaker_enabled = bool(self.get_parameter("speaker_enabled").value)
         self._query_volume = bool(self.get_parameter("query_volume_on_start").value)
+        self._endpoint_discovery_timeout_s = float(
+            self.get_parameter("endpoint_discovery_timeout_s").value)
+        self._max_enabled_volume = int(
+            self.get_parameter("max_enabled_volume").value)
         self._app_name = str(self.get_parameter("app_name").value).strip()
         self._request_timeout_s = float(self.get_parameter("request_timeout_s").value)
         if not self._app_name or not 0.1 <= self._request_timeout_s <= 10.0:
             raise RuntimeError("invalid app_name or request_timeout_s")
+        if not 0.1 <= self._endpoint_discovery_timeout_s <= 30.0:
+            raise RuntimeError("endpoint_discovery_timeout_s must be in [0.1, 30]")
+        if not 1 <= self._max_enabled_volume <= 25:
+            raise RuntimeError("max_enabled_volume must be in [1, 25]")
+        if self._speaker_enabled and not self._query_volume:
+            raise RuntimeError(
+                "speaker output requires query_volume_on_start=true")
 
         bytes_per_ms = 16_000 * 1 * 2 // 1000
         self._gate = PcmGate(PcmContract(
@@ -80,6 +93,9 @@ class G1VoiceBridge(Node):
         self._request_timeout_total = 0
         self._unitree_error_total = 0
         self._volume_confirmed = False
+        self._reported_volume: int | None = None
+        self._endpoint_discovery_deadline_s = (
+            time.monotonic() + self._endpoint_discovery_timeout_s)
         namespace_parts = [part for part in self.get_namespace().split("/") if part]
         if len(namespace_parts) < 2 or namespace_parts[-2] != "ferox":
             raise RuntimeError("G1 voice bridge must run in /ferox/<robot_id>")
@@ -237,10 +253,20 @@ class G1VoiceBridge(Node):
         if self._latched_fault is not None:
             return
         if self._query_volume:
+            request_matched = self._request_pub.get_subscription_count() == 1
+            response_matched = self.count_publishers("/api/voice/response") == 1
+            if not request_matched or not response_matched:
+                if now >= self._endpoint_discovery_deadline_s:
+                    self._latch_fault(
+                        "Unitree voice endpoints were not uniquely discovered "
+                        "before startup deadline")
+                return
             self._query_volume = False
             self._publish_request(GET_VOLUME_API_ID, {}, b"", "get_volume")
             return
         if not self._speaker_enabled:
+            return
+        if not self._volume_confirmed:
             return
         payload = self._gate.pop_request(now)
         if payload is not None:
@@ -288,6 +314,12 @@ class G1VoiceBridge(Node):
             if not 0 <= volume <= 100:
                 self._unitree_error_total += 1
                 self._latch_fault("get_volume returned an out-of-range value")
+                return
+            self._reported_volume = volume
+            if self._speaker_enabled and volume > self._max_enabled_volume:
+                self._latch_fault(
+                    "reported volume exceeds supervised playback ceiling: "
+                    f"{volume} > {self._max_enabled_volume}")
                 return
             self._volume_confirmed = True
             self.get_logger().info(f"G1 voice API ready; reported volume={volume}")

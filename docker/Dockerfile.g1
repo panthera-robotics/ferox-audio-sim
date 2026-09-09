@@ -56,7 +56,7 @@ RUN chmod 0555 /usr/local/bin/entrypoint-g1-dds.sh \
       'source /opt/ferox_msgs_ws/install/setup.bash' \
       'source /unitree_ws/install/setup.bash' \
       'source /workspace/install/setup.bash' \
-      'exec ros2 launch ferox_audio_g1 g1_voice_bridge.launch.py "$@"' \
+      'exec ros2 run ferox_audio_g1 g1_voice_bridge --ros-args -r __ns:=/ferox/${ROBOT_ID:-g1_01} --params-file /workspace/install/share/ferox_audio_g1/config/g1_voice_bridge.yaml "$@"' \
       > /entrypoint-g1.sh \
     && chmod 0555 /entrypoint-g1.sh
 

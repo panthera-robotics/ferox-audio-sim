@@ -12,6 +12,36 @@ def test_g1_runtime_is_safe_by_default_and_does_not_claim_a_microphone():
     assert "mic_raw is intentionally absent" in node
 
 
+def test_g1_runtime_waits_for_native_voice_endpoints_and_caps_volume():
+    config = (ROOT / "src/ferox_audio_g1/config/g1_voice_bridge.yaml").read_text()
+    node = (ROOT / "src/ferox_audio_g1/ferox_audio_g1/voice_bridge_node.py").read_text()
+    assert "endpoint_discovery_timeout_s: 5.0" in config
+    assert "max_enabled_volume: 25" in config
+    assert "get_subscription_count() == 1" in node
+    assert 'count_publishers("/api/voice/response") == 1' in node
+    assert "speaker output requires query_volume_on_start=true" in node
+    assert "reported volume exceeds supervised playback ceiling" in node
+
+
+def test_supervised_probe_requires_both_unique_voice_endpoints():
+    probe = (ROOT / (
+        "src/ferox_audio_g1/ferox_audio_g1/speaker_latency_probe.py")).read_text()
+    assert "request_subscriptions == 1 and response_publishers == 1" in probe
+    assert "request_subscriptions=" in probe
+    assert "response_publishers=" in probe
+
+
+def test_g1_container_propagates_voice_node_failure():
+    dockerfile = (ROOT / "docker/Dockerfile.g1").read_text()
+    entrypoint = next(
+        line for line in dockerfile.splitlines()
+        if "exec ros2 run ferox_audio_g1 g1_voice_bridge" in line)
+    assert "--ros-args -r __ns:=/ferox/${ROBOT_ID:-g1_01}" in entrypoint
+    assert "--params-file /workspace/install/share/ferox_audio_g1/config/" in entrypoint
+    assert '"$@"' in entrypoint
+    assert "exec ros2 launch ferox_audio_g1" not in dockerfile
+
+
 def test_arm64_image_keeps_required_rosidl_and_test_gates():
     dockerfile = (ROOT / "docker/Dockerfile.g1").read_text()
     assert "ros-${ROS_DISTRO}-rosidl-generator-dds-idl" in dockerfile
