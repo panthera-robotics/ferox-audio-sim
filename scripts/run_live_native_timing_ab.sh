@@ -6,6 +6,9 @@ if [[ $# -ne 3 ]]; then
   exit 64
 fi
 
+: "${FEROX_DDS_INTERFACE:?set FEROX_DDS_INTERFACE to the approved robot-LAN interface}"
+: "${FEROX_DDS_IPV4_CIDR:?set FEROX_DDS_IPV4_CIDR to the approved robot-LAN IPv4 CIDR}"
+
 image="$1"
 evidence_root="$2"
 duration_seconds="$3"
@@ -74,7 +77,8 @@ common=(
   --env HOME=/home/panthera
   --env RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
   --env ROS_DOMAIN_ID=0
-  --env FEROX_DDS_INTERFACE=eth0
+  --env "FEROX_DDS_INTERFACE=${FEROX_DDS_INTERFACE}"
+  --env "FEROX_DDS_IPV4_CIDR=${FEROX_DDS_IPV4_CIDR}"
   --env FEROX_DDS_PEERS=
   --env CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
 )
