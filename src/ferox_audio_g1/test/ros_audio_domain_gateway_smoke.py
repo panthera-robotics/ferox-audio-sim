@@ -35,7 +35,7 @@ def _audio(node, sequence, offset, flags):
     message.sequence = sequence
     message.sample_offset = offset
     message.flags = flags
-    message.sample_rate = 16000
+    message.sample_rate = 22050
     message.channels = 1
     message.sample_width = 2
     message.data = bytes(3200)

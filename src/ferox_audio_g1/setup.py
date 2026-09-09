@@ -28,6 +28,7 @@ setup(
             "g1_voice_readonly_probe = ferox_audio_g1.readonly_probe:main",
             "g1_speaker_latency_probe = ferox_audio_g1.speaker_latency_probe:main",
             "g1_readaloud_probe = ferox_audio_g1.readaloud_probe:main",
+            "g1_mic_stream_probe = ferox_audio_g1.mic_stream_probe:main",
             "audio_domain_gateway = ferox_audio_g1.audio_domain_gateway:main",
         ],
     },

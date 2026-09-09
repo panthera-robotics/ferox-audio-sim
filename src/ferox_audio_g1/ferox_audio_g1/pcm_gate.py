@@ -32,8 +32,9 @@ class PcmContract:
     idle_flush_s: float = 0.15
 
     def __post_init__(self) -> None:
-        if self.sample_rate != 16_000 or self.channels != 1 or self.sample_width != 2:
-            raise ValueError("G1 PlayStream requires 16 kHz mono signed 16-bit PCM")
+        if self.sample_rate not in (16_000, 22_050) or self.channels != 1 or self.sample_width != 2:
+            raise ValueError(
+                "Ferox voice PCM must be 16 or 22.05 kHz mono signed 16-bit PCM")
         if self.max_chunk_bytes <= 0 or self.max_chunk_bytes % 2:
             raise ValueError("max_chunk_bytes must be a positive whole-sample size")
         if not 0 < self.target_request_bytes <= self.max_buffer_bytes:
@@ -142,7 +143,8 @@ class PcmGate:
             c.channels,
             c.sample_width,
         ):
-            self._reject("expected 16000 Hz, mono, signed 16-bit little-endian PCM")
+            self._reject(
+                f"expected {c.sample_rate} Hz, mono, signed 16-bit little-endian PCM")
         payload = bytes(data)
         if not payload:
             self._reject("empty PCM chunks are not valid stream evidence")
