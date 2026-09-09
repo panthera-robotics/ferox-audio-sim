@@ -37,11 +37,18 @@ class VoiceApiProbe(Node):
 
     def wait_for_service(self, timeout_s: float = 3.0) -> None:
         deadline = time.monotonic() + timeout_s
+        request_subscriptions = 0
+        response_publishers = 0
         while time.monotonic() < deadline:
-            if self._publisher.get_subscription_count() == 1:
+            request_subscriptions = self._publisher.get_subscription_count()
+            response_publishers = self.count_publishers("/api/voice/response")
+            if request_subscriptions == 1 and response_publishers == 1:
                 return
             rclpy.spin_once(self, timeout_sec=0.05)
-        raise TimeoutError("Unitree Voice request subscriber was not uniquely discovered")
+        raise TimeoutError(
+            "Unitree Voice endpoints were not uniquely discovered: "
+            f"request_subscriptions={request_subscriptions}, "
+            f"response_publishers={response_publishers}")
 
     def call(
         self,
