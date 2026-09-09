@@ -23,7 +23,8 @@ services:
     environment:
       RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
       ROS_DOMAIN_ID: "0"
-      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:?set FEROX_DDS_INTERFACE, normally eth0}
+      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:?set the approved robot-LAN interface}
+      FEROX_DDS_IPV4_CIDR: ${FEROX_DDS_IPV4_CIDR:?set the approved robot-LAN IPv4 CIDR}
       FEROX_DDS_PEERS: ${FEROX_DDS_PEERS:-}
     restart: on-failure:5
     command:
@@ -53,7 +54,8 @@ services:
       - /home/panthera/.ros:rw,nosuid,nodev,noexec,size=16m
     environment:
       RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
-      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:?set FEROX_DDS_INTERFACE, normally eth0}
+      FEROX_DDS_INTERFACE: ${FEROX_DDS_INTERFACE:?set the approved robot-LAN interface}
+      FEROX_DDS_IPV4_CIDR: ${FEROX_DDS_IPV4_CIDR:?set the approved robot-LAN IPv4 CIDR}
       FEROX_DDS_PEERS: ${FEROX_DDS_PEERS:-}
     restart: on-failure:5
     command:

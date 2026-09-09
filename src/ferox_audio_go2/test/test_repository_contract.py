@@ -17,6 +17,8 @@ def test_go2_audio_is_fail_closed_and_evidence_pinned_by_default():
     assert "GO2_AUDIO_RUNTIME_FIRMWARE:-disabled" in compose
     assert "GO2_AUDIO_EVIDENCE_SHA256:-disabled" in compose
     assert "FEROX_DDS_INTERFACE:?" in compose
+    assert compose.count("FEROX_DDS_IPV4_CIDR:?") == 2
+    assert "normally eth0" not in compose
     for argument in (
             "mic_enabled", "speaker_enabled", "hardware_profile",
             "runtime_firmware", "evidence_path", "evidence_sha256"):
@@ -140,6 +142,19 @@ def test_arm64_image_builds_exact_unitree_commit_and_runs_gates():
     assert "> /entrypoint-go2-gateway.sh" in dockerfile
     assert "ENV ROS_LOG_DIR=/tmp/ros-logs" in dockerfile
     assert "USER 10001:10001" in dockerfile
+    assert "iproute2" in dockerfile
     assert "exec ros2 run ferox_audio_go2 go2_audio_bridge" in bridge_entrypoint
     assert "unsupported Go2 audio bridge argument" in bridge_entrypoint
     assert "exec ros2 launch" not in bridge_entrypoint
+
+
+def test_go2_dds_entrypoint_requires_a_live_approved_ipv4_binding():
+    entrypoint = (ROOT / "docker/entrypoint-g1-dds.sh").read_text()
+    assert "FEROX_DDS_INTERFACE:?" in entrypoint
+    assert "FEROX_DDS_IPV4_CIDR:?" in entrypoint
+    assert 'ip -o link show dev "${FEROX_DDS_INTERFACE}"' in entrypoint
+    assert "LOWER_UP" in entrypoint
+    assert "NO-CARRIER" in entrypoint
+    assert 'ip -o -4 address show dev "${FEROX_DDS_INTERFACE}"' in entrypoint
+    assert 'grep -Fxq -- "${FEROX_DDS_IPV4_CIDR}"' in entrypoint
+    assert "autodetermine" not in entrypoint
