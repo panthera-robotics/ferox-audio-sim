@@ -22,6 +22,17 @@ def test_arm64_image_keeps_required_rosidl_and_test_gates():
     assert "'set -euo pipefail'" not in dockerfile
 
 
+def test_g1_runtime_uses_bounded_automatic_dds_participant_discovery():
+    dockerfile = (ROOT / "docker/Dockerfile.g1").read_text()
+    template = (ROOT / "config/cyclonedds.xml.template").read_text()
+    assert (
+        "COPY config/cyclonedds.xml.template /etc/cyclonedds.xml.template"
+        in dockerfile
+    )
+    assert "<ParticipantIndex>auto</ParticipantIndex>" in template
+    assert "<MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>" in template
+
+
 def test_dds_entrypoint_rejects_unexpanded_templates():
     entrypoint = (ROOT / "docker/entrypoint-g1-dds.sh").read_text()
     assert 'if "${" in source:' in entrypoint
