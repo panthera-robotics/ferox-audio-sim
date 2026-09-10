@@ -217,6 +217,26 @@ class Go2MicBridgeCore:
             maxlen=max(1, math.ceil(60.0 / source_frame_s)))
         self.source_to_chunk_latencies_ms = deque(maxlen=600)
         self._reset_stream(discontinuity=False)
+        self._subscribers: frozenset[bytes] = frozenset()
+
+    def observe_subscribers(self, identities: frozenset[bytes]) -> None:
+        """Cut output on a newly discovered endpoint, not merely a count rise.
+
+        Preserve decoder history and source freshness/sequence validation.
+        Only buffered output is discarded; never splice pre-join PCM into a
+        replacement stream. Call on the same executor as ingest.
+        """
+        identities = frozenset(identities)
+        if identities - self._subscribers:
+            self._pending.clear()
+            self._pending_started_receive_s = None
+            self._stream_id = self._new_stream_id()
+            self._sequence = 0
+            self._sample_offset = 0
+            self._started = False
+            self._discontinuity_pending = True
+            self.discontinuities += 1
+        self._subscribers = identities
 
     def _new_stream_id(self) -> str:
         value = str(self._stream_id_factory())
