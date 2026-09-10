@@ -17,6 +17,7 @@ def main(args=None) -> None:
         from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
         from ferox_msgs.msg import AudioChunk
         from rclpy.node import Node
+        from rclpy.executors import ExternalShutdownException
         from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
         from unitree_api.msg import Request, Response
         from unitree_go.msg import AudioData
@@ -134,6 +135,7 @@ def main(args=None) -> None:
         if speaker_enabled else None)
     last_source_receive: list[float | None] = [None]
     speaker_rejections = [0]
+    next_graph_check = [0.0]
 
     def latch(reason: str) -> None:
         if not latched_fault:
@@ -147,6 +149,13 @@ def main(args=None) -> None:
         receive_steady = time.monotonic()
         receive_now = node.get_clock().now()
         try:
+            if receive_steady >= next_graph_check[0]:
+                assert mic_pub is not None
+                mic_core.observe_subscribers(frozenset(
+                    bytes(endpoint.endpoint_gid)
+                    for endpoint in node.get_subscriptions_info_by_topic(
+                        mic_pub.topic_name)))
+                next_graph_check[0] = receive_steady + 0.1
             chunks = mic_core.ingest(
                 bytes(message.data),
                 time_frame=int(message.time_frame),
@@ -296,7 +305,7 @@ def main(args=None) -> None:
         f"entities={sum(entity is not None for entity in keepalive)}")
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if mic_core is not None:
